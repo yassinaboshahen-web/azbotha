@@ -1,11 +1,25 @@
-<div align="center">
+# صاحب يومك · Day Companion
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+تطبيق ذكي وهادي بيبسطلك يومك ويجاوبك على سؤال: إيه اللي ورايا؟
 
-  <h1>Built with AI Studio</h2>
+## خطوات بناء تطبيق الأندرويد (APK):
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+1. **تثبيت الاعتمادات:**
+   ```bash
+   npm install
+   ```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+2. **بناء المشروع ودمجه مع أندرويد:**
+   ```bash
+   npm run build:android
+   ```
 
-</div>
+3. **فتح المشروع في Android Studio:**
+   ```bash
+   npx cap open android
+   ```
+
+4. **من داخل Android Studio:**
+   - استنّى Gradle يخلص تحميل.
+   - من القائمة العلوية اختر: **Build** > **Build Bundle(s) / APK(s)** > **Build APK(s)**.
+   - بعد ما يخلص، هيظهر إشعار، دوس على **locate** عشان تلاقي ملف الـ APK.

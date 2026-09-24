@@ -1,0 +1,11 @@
+{
+  "appId": "com.kareem.daycompanion",
+  "appName": "صاحب يومك",
+  "webDir": "dist",
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#243B35"
+    }
+  }
+}
