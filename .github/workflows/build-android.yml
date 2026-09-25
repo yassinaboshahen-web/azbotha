@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-    - package-lock-only
+      - package-lock-only
 
 jobs:
   build:
