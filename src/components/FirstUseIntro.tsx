@@ -31,7 +31,7 @@ export const FirstUseIntro: React.FC<FirstUseIntroProps> = ({ onDismiss, onOpenQ
             </h2>
           </div>
           <p className="text-xs sm:text-sm text-[#77766F] leading-relaxed max-w-xl">
-            <strong>صاحب يومك</strong> معمول عشان يبسطلك يومك بدون دوشة — يعرض مواعيدك في سريان زمني هادي ويجاوبك بوضوح على سؤال: <span className="text-[#243B35] font-semibold">إيه اللي ورايا؟</span>
+            <strong>ازبطها</strong> معمول عشان يبسطلك يومك بدون دوشة — يعرض مواعيدك في سريان زمني هادي ويجاوبك بوضوح على سؤال: <span className="text-[#243B35] font-semibold">إيه اللي ورايا؟</span>
           </p>
 
           {/* 3 Quick Visual Value Anchors */}

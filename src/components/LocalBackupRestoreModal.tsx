@@ -125,7 +125,7 @@ export const LocalBackupRestoreModal: React.FC<LocalBackupRestoreModalProps> = (
         
         try {
           await Share.share({
-              title: 'نسخة احتياطية لصاحب يومك',
+              title: 'نسخة احتياطية لازبطها',
               text: 'نسخة احتياطية من بيانات صاحب يومك',
               files: [result.uri],
               dialogTitle: 'احفظ النسخة الاحتياطية'
@@ -190,7 +190,7 @@ export const LocalBackupRestoreModal: React.FC<LocalBackupRestoreModalProps> = (
         }
 
         if (backup.app !== 'daycompanion') {
-          throw new Error('الملف ده مش تبع برنامج "صاحب يومك".');
+          throw new Error('الملف ده مش تبع برنامج " ازبطها".');
         }
 
         if (typeof backup.version !== 'number' || backup.version > 1) {

@@ -1,6 +1,6 @@
 {
-  "name": "Day Companion - صاحب يومك",
-  "description": "صاحب يومك الذكي والهادي، بيبسطلك يومك ويجاوبك على سؤال: إيه اللي ورايا؟",
+  "name": "ازبطها",
+  "description": "ازبطها — صاحبك في تنظيم يومك ومواعيدك ومهامك.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

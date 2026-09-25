@@ -52,7 +52,7 @@ export function evaluateSmartDayContext(params: {
         moodKey: 'empty',
         greeting: 'عامل إيه؟ 👋 يلا نشوف وراك إيه النهارده.',
         headline: 'يومك لسه فاضي.',
-        subtext: 'ضيف أول حاجة وراك وخلي "صاحب يومك" يرتبلك سريان الوقت خطوة بخطوة 🍃',
+        subtext: 'ضيف أول حاجة وراك وخلي " ازبطها" يرتبلك سريان الوقت خطوة بخطوة 🍃',
         badge: 'يوم رايق',
       };
     } else {

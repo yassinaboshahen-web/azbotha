@@ -120,7 +120,7 @@ export function calculateReportMetrics(
 export function formatReportSummaryText(metrics: ReportMetrics, periodName: string): string {
   const { completionRate, totalEvents, totalTasks, busiestDay, overdueTasksCount } = metrics;
   
-  let text = `📊 ملخص ${periodName} لـ "صاحب يومك":\n\n`;
+  let text = `📊 ملخص ${periodName} لـ "ازبطها ":\n\n`;
   
   if (totalEvents + totalTasks === 0) {
     return `${text}الفترة دي كانت هادية جداً، مفيش مواعيد أو مهام مسجلة. ريح دماغك! 😌`;

@@ -93,7 +93,7 @@ export const WeeklyExportModal: React.FC<WeeklyExportModalProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-[#E4DED4] pb-4 gap-2">
             <div>
               <div className="text-xs font-bold text-[#C58B5C] uppercase tracking-wider mb-1">
-                صاحب يومك · {periodName === 'الأسبوع ده' ? 'Weekly' : 'Monthly'} Summary
+                 ازبطها · {periodName === 'الأسبوع ده' ? 'Weekly' : 'Monthly'} Summary
               </div>
               <h3 className="text-xl sm:text-2xl font-bold text-[#243B35]">
                 {metrics.completionRate > 70 ? 'أداء ممتاز يا بطل! 🚀' : 'أسبوع هادي ومنظم 🌿'}

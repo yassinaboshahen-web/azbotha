@@ -31,7 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-lg sm:text-xl font-bold tracking-tight text-[#243B35]">
-              صاحب يومك
+            ازبطها
             </span>
             {apiClient.isCloudSyncEnabled() && <SyncStatusBadge />}
           </div>
