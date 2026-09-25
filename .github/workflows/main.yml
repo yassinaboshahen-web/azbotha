@@ -1,4 +1,4 @@
-
+yaml
 name: Build Android APK
 
 on:
@@ -53,4 +53,4 @@ jobs:
         with:
           name: azbotha-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
-```
+
