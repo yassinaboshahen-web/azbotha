@@ -1,14 +1,12 @@
 import React from 'react';
-import { Bell, Volume2, VolumeX, Sparkles, WifiOff } from 'lucide-react';
+import { Bell, Sparkles } from 'lucide-react';
 import { sound } from '../utils/audio';
-import { SyncStatusBadge } from './SyncStatusBadge';
-import { apiClient } from '../services/apiClient';
 
 interface HeaderProps {
   unreadNotifsCount: number;
   onOpenNotifications: () => void;
-  soundEnabled: boolean;
-  onToggleSound: () => void;
+  soundEnabled?: boolean;
+  onToggleSound?: () => void;
   isToday: boolean;
   onJumpToToday: () => void;
 }
@@ -16,8 +14,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   unreadNotifsCount,
   onOpenNotifications,
-  soundEnabled,
-  onToggleSound,
   isToday,
   onJumpToToday,
 }) => {
@@ -26,15 +22,11 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-4xl mx-auto flex items-center justify-between">
         {/* Brand Lockup */}
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-[#243B35] flex items-center justify-center text-[#D8C3A5] font-bold text-sm shadow-xs select-none">
-            ص
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-lg sm:text-xl font-bold tracking-tight text-[#243B35]">
-              صاحب يومك
-            </span>
-            {apiClient.isCloudSyncEnabled() && <SyncStatusBadge />}
-          </div>
+          <img
+            src="/logo.png"
+            alt="ازبطها"
+            className="h-8 sm:h-9 w-auto max-h-9 object-contain rounded-xl shadow-xs select-none"
+          />
         </div>
 
         {/* Action Controls */}
@@ -52,23 +44,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="sm:hidden">اليوم</span>
             </button>
           )}
-
-          {/* Sound Toggle */}
-          <button
-            onClick={() => {
-              onToggleSound();
-              sound.playTap();
-            }}
-            aria-label={soundEnabled ? 'كتم الصوت' : 'تفعيل المؤثرات الصوتية'}
-            className="w-10 h-10 rounded-full flex items-center justify-center text-[#77766F] hover:text-[#243B35] hover:bg-[#E4DED4]/60 transition-colors active:scale-95 cursor-pointer focus-visible:ring-2 focus-visible:ring-[#243B35] outline-none"
-            title={soundEnabled ? 'المؤثرات الصوتية مفعلة' : 'المؤثرات الصوتية مكتومة'}
-          >
-            {soundEnabled ? (
-              <Volume2 className="w-4 h-4" />
-            ) : (
-              <VolumeX className="w-4 h-4 opacity-50" />
-            )}
-          </button>
 
           {/* Contextual Notification Trigger */}
           <button

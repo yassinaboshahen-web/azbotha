@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">صاحب يومك</string>
-    <string name="title_activity_main">صاحب يومك</string>
+    <string name="app_name">ازبطها</string>
+    <string name="title_activity_main">ازبطها</string>
     <string name="package_name">com.kareem.daycompanion</string>
     <string name="custom_url_scheme">com.kareem.daycompanion</string>
 </resources>

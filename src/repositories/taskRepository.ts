@@ -16,12 +16,18 @@ export const taskRepository = {
     const id = data.id || `tsk_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
+    const taskDate = (data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date))
+      ? data.due_date
+      : (data.date && /^\d{4}-\d{2}-\d{2}$/.test(data.date))
+      ? data.date
+      : (data.due_date || data.date || '');
+
     const task: TaskRecord = {
       id,
       anonymous_user_id: anonId,
       title: data.title,
       description: data.description || data.notes || '',
-      due_date: data.due_date || data.date || '',
+      due_date: taskDate,
       due_time: data.due_time || '',
       priority: data.priority || 'normal',
       completed: Boolean(data.completed),
@@ -31,7 +37,7 @@ export const taskRepository = {
       category: data.category || 'عام',
       reminder: Boolean(data.reminder),
       notes: data.notes || data.description || '',
-      date: data.due_date || data.date || '',
+      date: taskDate,
     };
 
     const db = await getDB();

@@ -244,11 +244,14 @@ export const SyncManager = {
           const localUpdated = localTask?.updated_at || localTask?.created_at || '1970-01-01T00:00:00.000Z';
 
           if (!localTask || new Date(remoteUpdated).getTime() >= new Date(localUpdated).getTime()) {
+            const rawTaskDate = remoteTask.due_date || remoteTask.date || localTask?.due_date || localTask?.date;
+            const validTaskDate = (rawTaskDate && /^\d{4}-\d{2}-\d{2}$/.test(rawTaskDate)) ? rawTaskDate : undefined;
+
             const parsedTask: TaskItem = {
               id: tId,
               title: remoteTask.title || localTask?.title || '',
               description: remoteTask.description || localTask?.description || localTask?.notes || undefined,
-              due_date: remoteTask.due_date || localTask?.due_date || localTask?.date || undefined,
+              due_date: validTaskDate,
               due_time: remoteTask.due_time || localTask?.due_time || undefined,
               priority: remoteTask.priority || localTask?.priority || 'normal',
               status: remoteTask.status || localTask?.status || (remoteTask.completed ? 'completed' : 'pending'),
@@ -257,7 +260,7 @@ export const SyncManager = {
               created_at: remoteTask.created_at || localTask?.created_at,
               updated_at: remoteTask.updated_at || localTask?.updated_at,
               category: remoteTask.category || localTask?.category || 'عام',
-              date: remoteTask.due_date || localTask?.date || localTask?.due_date || undefined,
+              date: validTaskDate,
               reminder: remoteTask.reminder !== undefined ? Boolean(remoteTask.reminder) : (localTask ? Boolean(localTask.reminder) : false),
               notes: remoteTask.notes || localTask?.notes || remoteTask.description || localTask?.description || '',
             };
@@ -280,10 +283,13 @@ export const SyncManager = {
           const localUpdated = localEvt?.updated_at || localEvt?.created_at || '1970-01-01T00:00:00.000Z';
 
           if (!localEvt || new Date(remoteUpdated).getTime() >= new Date(localUpdated).getTime()) {
+            const rawEvtDate = remoteEvt.date || remoteEvt.event_date || localEvt?.date;
+            const validEvtDate = (rawEvtDate && /^\d{4}-\d{2}-\d{2}$/.test(rawEvtDate)) ? rawEvtDate : (localEvt?.date || '');
+
             const parsedEvt: CalendarEvent = {
               id: eId,
               title: remoteEvt.title || localEvt?.title || '',
-              date: remoteEvt.date || remoteEvt.event_date || localEvt?.date || new Date().toISOString().split('T')[0],
+              date: validEvtDate,
               time: remoteEvt.start_time || remoteEvt.time || localEvt?.time || localEvt?.start_time || '09:00',
               start_time: remoteEvt.start_time || remoteEvt.time || localEvt?.start_time || localEvt?.time || '09:00',
               end_time: remoteEvt.end_time || remoteEvt.endTime || localEvt?.end_time || localEvt?.endTime || undefined,

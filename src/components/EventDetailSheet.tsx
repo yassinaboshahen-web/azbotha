@@ -39,6 +39,7 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState('');
+  const [eventDate, setEventDate] = useState('');
   const [time, setTime] = useState('09:00');
   const [endTime, setEndTime] = useState('');
   const [category, setCategory] = useState<EventCategory>('lecture');
@@ -61,6 +62,7 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
   useEffect(() => {
     if (event) {
       setTitle(event.title || '');
+      setEventDate(event.date || '');
       setTime(event.time || '09:00');
       setEndTime(event.endTime || '');
       setCategory(event.category || 'lecture');
@@ -103,6 +105,7 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
       onUpdateEvent({
         ...event,
         title: title.trim(),
+        date: eventDate || event.date,
         time,
         endTime: endTime.trim() || undefined,
         category,
@@ -232,6 +235,18 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
                   if (validationError) setValidationError('');
                 }}
                 className="w-full px-3.5 py-2 rounded-xl bg-white border border-[#E4DED4] text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#243B35] mb-1">
+                تاريخ المعاد
+              </label>
+              <input
+                type="date"
+                value={eventDate}
+                onChange={(e) => setEventDate(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-white border border-[#E4DED4] text-xs text-[#242522]"
               />
             </div>
 

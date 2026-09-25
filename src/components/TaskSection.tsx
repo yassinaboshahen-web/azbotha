@@ -7,6 +7,7 @@ import { EmptyState } from './EmptyState';
 interface TaskSectionProps {
   tasks: TaskItem[];
   overdueTasks?: TaskItem[];
+  selectedDate?: string;
   onToggleTask: (taskId: string) => void;
   onAddTask: (taskInput: Partial<TaskItem> & { title: string }) => Promise<boolean>;
   onDeleteTask: (taskId: string) => void;
@@ -16,6 +17,7 @@ interface TaskSectionProps {
 export const TaskSection: React.FC<TaskSectionProps> = ({
   tasks,
   overdueTasks = [],
+  selectedDate,
   onToggleTask,
   onAddTask,
   onDeleteTask,
@@ -37,7 +39,14 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
     setIsSubmitting(true);
     try {
       sound.playPop();
-      await onAddTask({ title: quickInput.trim(), priority: 'normal', category: 'عام', reminder: true });
+      await onAddTask({
+        title: quickInput.trim(),
+        priority: 'normal',
+        category: 'عام',
+        reminder: true,
+        date: selectedDate,
+        due_date: selectedDate,
+      });
       setQuickInput('');
     } finally {
       setIsSubmitting(false);

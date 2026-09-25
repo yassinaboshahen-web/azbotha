@@ -26,8 +26,6 @@ import { TomorrowPreview } from './components/TomorrowPreview';
 import { QuickAddModal } from './components/QuickAddModal';
 import { EventDetailSheet } from './components/EventDetailSheet';
 import { NotificationSheet } from './components/NotificationSheet';
-import { DeviceTransferModal } from './components/DeviceTransferModal';
-import { LocalBackupRestoreModal } from './components/LocalBackupRestoreModal';
 import { WeekView } from './components/WeekView';
 import { MonthView } from './components/MonthView';
 import { OfflineBanner, ErrorStateBanner } from './components/OfflineBanner';
@@ -81,37 +79,7 @@ export default function App() {
   const [isQuickAddOpen, setIsQuickAddOpen] = useState<boolean>(false);
   const [selectedEventForDetail, setSelectedEventForDetail] = useState<CalendarEvent | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
-  const [isDeviceTransferOpen, setIsDeviceTransferOpen] = useState<boolean>(false);
-  const [isLocalBackupOpen, setIsLocalBackupOpen] = useState<boolean>(false);
   const [showStorageWarning, setShowStorageWarning] = useState<boolean>(false);
-  const [showBackupReminder, setShowBackupReminder] = useState<boolean>(false);
-
-  useEffect(() => {
-      async function checkBackupStatus() {
-          const lastBackup = await indexedDBRepository.getMetadata<string>('lastBackupAt');
-          const lastDismissed = await indexedDBRepository.getMetadata<string>('lastBackupReminderDismissedAt');
-          
-          const now = Date.now();
-          const itemsCount = tasks.length + events.length;
-
-          if (itemsCount > 5) {
-              let shouldShow = false;
-              if (!lastBackup) {
-                  shouldShow = true;
-              } else {
-                  const daysSinceBackup = (now - new Date(lastBackup).getTime()) / (1000 * 60 * 60 * 24);
-                  if (daysSinceBackup >= 7) shouldShow = true;
-              }
-
-              if (shouldShow && lastDismissed) {
-                  const daysSinceDismissed = (now - new Date(lastDismissed).getTime()) / (1000 * 60 * 60 * 24);
-                  if (daysSinceDismissed < 3) shouldShow = false;
-              }
-              setShowBackupReminder(shouldShow);
-          }
-      }
-      checkBackupStatus();
-  }, [tasks, events]);
 
   const todayStr = getTodayDateString();
   const tomorrowStr = getRelativeDateString(1);
@@ -267,10 +235,6 @@ export default function App() {
           setIsQuickAddOpen(false);
         } else if (isNotificationsOpen) {
           setIsNotificationsOpen(false);
-        } else if (isLocalBackupOpen) {
-          setIsLocalBackupOpen(false);
-        } else if (isDeviceTransferOpen) {
-          setIsDeviceTransferOpen(false);
         } else if (selectedEventForDetail) {
           setSelectedEventForDetail(null);
         } else {
@@ -289,7 +253,7 @@ export default function App() {
         activeListener.remove();
       }
     };
-  }, [isQuickAddOpen, isNotificationsOpen, isLocalBackupOpen, isDeviceTransferOpen, selectedEventForDetail]);
+  }, [isQuickAddOpen, isNotificationsOpen, selectedEventForDetail]);
 
   const handleDismissIntro = () => {
     setShowIntro(false);
@@ -552,8 +516,14 @@ export default function App() {
   };
 
   const handleAddEvent = async (newEventData: Omit<CalendarEvent, 'id' | 'completed'>) => {
+    const rawDate = newEventData.date;
+    const targetDate = (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate))
+      ? rawDate
+      : (selectedDate || getTodayDateString());
+
     const newEvent: CalendarEvent = {
       ...newEventData,
+      date: targetDate,
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       completed: false,
     };
@@ -625,7 +595,12 @@ export default function App() {
     const priority = (typeof taskInput === 'object' && taskInput.priority) || 'normal';
     const category = (typeof taskInput === 'object' && taskInput.category) || 'عام';
     const notes = (typeof taskInput === 'object' && (taskInput.notes || taskInput.description)) || '';
-    const dateVal = (typeof taskInput === 'object' && (taskInput.date || taskInput.due_date)) || selectedDate;
+    
+    const rawDate = typeof taskInput === 'object' ? (taskInput.date || taskInput.due_date) : undefined;
+    const targetDate = (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate))
+      ? rawDate
+      : (selectedDate || getTodayDateString());
+
     const due_time = (typeof taskInput === 'object' && taskInput.due_time) || '';
     const reminder = typeof taskInput === 'object' ? Boolean(taskInput.reminder) : false;
 
@@ -633,8 +608,8 @@ export default function App() {
       id: `tsk_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title,
       completed: false,
-      date: dateVal,
-      due_date: dateVal,
+      date: targetDate,
+      due_date: targetDate,
       due_time,
       priority,
       category,
@@ -656,8 +631,8 @@ export default function App() {
           title, 
           notes, 
           description: notes, 
-          date: dateVal, 
-          due_date: dateVal, 
+          date: targetDate, 
+          due_date: targetDate, 
           due_time, 
           priority, 
           category, 
@@ -884,16 +859,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F6F3EE] text-[#242522] flex flex-col font-sans antialiased pb-28">
-      {showBackupReminder && (
-        <div className="bg-[#C58B5C] text-[#F6F3EE] py-3 px-4 text-xs font-bold shadow-md flex items-center justify-between gap-4">
-          <span>🛡️ عملت نسخة احتياطية لبياناتك؟ مهم عشان مفيش حاجة تضيع.</span>
-          <div className="flex gap-2">
-            <button onClick={() => { setIsLocalBackupOpen(true); setShowBackupReminder(false); }} className="px-3 py-1 bg-[#243B35] rounded-lg">النسخ الآن</button>
-            <button onClick={async () => { await indexedDBRepository.setMetadata('lastBackupReminderDismissedAt', new Date().toISOString()); setShowBackupReminder(false); }} className="px-3 py-1 bg-[#F6F3EE]/20 rounded-lg">افتكرني بعدين</button>
-          </div>
-        </div>
-      )}
-
       {/* Top Application Header */}
       <Header
         unreadNotifsCount={unreadNotifsCount}
@@ -964,6 +929,7 @@ export default function App() {
                     <TaskSection
                       tasks={currentDayTasks}
                       overdueTasks={overdueTasks}
+                      selectedDate={selectedDate}
                       onToggleTask={handleToggleTask}
                       onAddTask={handleAddTask}
                       onDeleteTask={handleDeleteTask}
@@ -1020,6 +986,9 @@ export default function App() {
                   setSelectedDate(dateStr);
                   setZoomLevel('day');
                 }}
+                onChangeDate={(dateStr) => {
+                  setSelectedDate(dateStr);
+                }}
               />
             )}
 
@@ -1054,14 +1023,17 @@ export default function App() {
       </div>
 
       {/* Quick Add Modal */}
-      <QuickAddModal
-        isOpen={isQuickAddOpen}
-        onClose={() => setIsQuickAddOpen(false)}
-        selectedDate={selectedDate}
-        onAddEvent={handleAddEvent}
-        onAddTask={handleAddTask}
-        onAddThought={handleAddThought}
-      />
+      {isQuickAddOpen && (
+        <QuickAddModal
+          key={`${selectedDate}_open`}
+          isOpen={isQuickAddOpen}
+          onClose={() => setIsQuickAddOpen(false)}
+          selectedDate={selectedDate}
+          onAddEvent={handleAddEvent}
+          onAddTask={handleAddTask}
+          onAddThought={handleAddThought}
+        />
+      )}
 
       {/* Event Details Sheet with Rescheduling & Editing */}
       <EventDetailSheet
@@ -1081,54 +1053,6 @@ export default function App() {
         notifications={notifications}
         onNotificationClick={handleNotificationClick}
         onMarkAllRead={handleMarkAllNotifsRead}
-        onOpenDeviceTransfer={() => {
-          setIsNotificationsOpen(false);
-          setIsDeviceTransferOpen(true);
-        }}
-        onOpenLocalBackup={() => {
-          setIsNotificationsOpen(false);
-          setIsLocalBackupOpen(true);
-        }}
-      />
-
-      {/* Device Transfer Modal */}
-      <DeviceTransferModal
-        isOpen={isDeviceTransferOpen}
-        onClose={() => setIsDeviceTransferOpen(false)}
-        onTransferSuccess={async () => {
-          try {
-            const synced = await syncService.fullSync();
-            if (synced) {
-              setTasks(synced.tasks);
-              setEvents(synced.events);
-              setThoughts(synced.reminders);
-              setNotifications(synced.notifications);
-            }
-          } catch {
-            // ignore
-          }
-        }}
-        addToast={addToast}
-      />
-
-      {/* Local Backup & Restore Modal */}
-      <LocalBackupRestoreModal
-        isOpen={isLocalBackupOpen}
-        onClose={() => setIsLocalBackupOpen(false)}
-        onDataImported={async () => {
-          try {
-            const localTasks = await indexedDBRepository.getAllTasks();
-            const localEvents = await indexedDBRepository.getAllEvents();
-            const localReminders = await indexedDBRepository.getAllReminders();
-            const localNotifs = await indexedDBRepository.getAllNotifications();
-            setTasks(localTasks);
-            setEvents(localEvents);
-            setThoughts(localReminders);
-            setNotifications(localNotifs);
-          } catch {
-            // ignore
-          }
-        }}
       />
 
       {/* Undo & Action Toast Notifications */}

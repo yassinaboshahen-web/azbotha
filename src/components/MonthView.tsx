@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { CalendarEvent, TaskItem } from '../types';
 import { parseDateString, formatDateToISO, getTodayDateString } from '../utils/dateUtils';
 import { ChevronRight, ChevronLeft, Sparkles, Calendar as CalendarIcon, Target, Flame, Share2 } from 'lucide-react';
@@ -28,6 +28,10 @@ export const MonthView: React.FC<MonthViewProps> = ({
 }) => {
   const [viewDate, setViewDate] = useState<Date>(() => parseDateString(currentDateStr));
   const [isExportOpen, setIsExportOpen] = useState(false);
+
+  useEffect(() => {
+    setViewDate(parseDateString(currentDateStr));
+  }, [currentDateStr]);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();

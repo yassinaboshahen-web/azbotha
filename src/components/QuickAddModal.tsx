@@ -51,6 +51,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   // Task State
   const [taskTitle, setTaskTitle] = useState('');
+  const [taskDate, setTaskDate] = useState(selectedDate);
   const [taskPriority, setTaskPriority] = useState<'urgent' | 'normal' | 'light'>('normal');
   const [taskCategory, setTaskCategory] = useState('جامعة');
   const [taskNotes, setTaskNotes] = useState('');
@@ -60,6 +61,15 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   // Thought State
   const [thoughtText, setThoughtText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Ensure dates are synced to selectedDate whenever modal opens or selectedDate changes
+  useEffect(() => {
+    if (isOpen) {
+      setEventDate(selectedDate);
+      setTaskDate(selectedDate);
+      setErrorMessage('');
+    }
+  }, [isOpen, selectedDate]);
 
   if (!isOpen) return null;
 
@@ -84,9 +94,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         custom: 'معاد',
       };
 
+      const finalDate = (eventDate && /^\d{4}-\d{2}-\d{2}$/.test(eventDate)) ? eventDate : selectedDate;
+
       const success = await onAddEvent({
         title: eventTitle.trim(),
-        date: eventDate || selectedDate,
+        date: finalDate,
         time: eventTime || '12:00',
         endTime: eventEndTime || undefined,
         category: eventCategory,
@@ -120,9 +132,12 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const finalDate = (taskDate && /^\d{4}-\d{2}-\d{2}$/.test(taskDate)) ? taskDate : selectedDate;
+
       const success = await onAddTask({
         title: taskTitle.trim(),
-        date: selectedDate,
+        date: finalDate,
+        due_date: finalDate,
         priority: taskPriority,
         category: taskCategory.trim() || undefined,
         notes: taskNotes.trim() || undefined,
@@ -167,6 +182,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   const resetForms = () => {
     setEventTitle('');
+    setEventDate(selectedDate);
+    setTaskDate(selectedDate);
     setEventLocation('');
     setEventInstructor('');
     setEventCourse('');
@@ -288,6 +305,18 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                 }}
                 placeholder="مثال: محاضرة ميكانيكا، ميتينج الشغل، جيم..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#243B35] mb-1.5">
+                تاريخ المعاد
+              </label>
+              <input
+                type="date"
+                value={eventDate}
+                onChange={(e) => setEventDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-xs sm:text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
               />
             </div>
 
@@ -431,6 +460,18 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                 }}
                 placeholder="مثال: تسليم شيت الماث، حجز تذكرة القطر..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#243B35] mb-1.5">
+                تاريخ المهمة
+              </label>
+              <input
+                type="date"
+                value={taskDate}
+                onChange={(e) => setTaskDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-xs sm:text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
               />
             </div>
 

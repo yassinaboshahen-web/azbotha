@@ -299,16 +299,4 @@ export const apiClient = {
     const data = await this.request<{ summary: Record<string, unknown> }>(`/api/insights/weekly-summary${query}`);
     return data.summary;
   },
-
-  // Device Transfer
-  async generateTransferCode(): Promise<{ code: string; expiresInMinutes: number }> {
-    return await this.request('/api/sync/transfer/generate', { method: 'POST' });
-  },
-
-  async claimTransferCode(code: string): Promise<{ success: boolean; anonymous_user_id: string; installationCredential?: string }> {
-    return await this.request('/api/sync/transfer/claim', {
-      method: 'POST',
-      body: JSON.stringify({ code }),
-    });
-  },
 };

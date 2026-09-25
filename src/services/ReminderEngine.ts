@@ -13,6 +13,8 @@ export interface ReminderTrigger {
   notificationType: 'upcoming' | 'task' | 'tomorrow' | 'reminder' | 'morning' | 'evening' | 'general';
 }
 
+export const REMINDER_CHANNEL_ID = 'azbatha_reminders_audible_v1';
+
 const FIRED_REMINDERS_KEY = 'fired_reminders_set';
 
 function hashStringToInt(str: string): number {
@@ -28,6 +30,64 @@ class ReminderEngineClass {
   private firedTriggerIds: Set<string> = new Set();
   private isLoaded = false;
   private onNotificationCallback: ((notif: NotificationItem) => void) | null = null;
+  private channelConfigured = false;
+
+  /**
+   * Configures the Android Notification Channel with IMPORTANCE_HIGH (4) and sound/vibration
+   * so local scheduled notifications produce normal audible notifications in the Android notification shade.
+   */
+  async ensureNotificationChannel(): Promise<void> {
+    if (this.channelConfigured) return;
+
+    try {
+      if (typeof window === 'undefined') return;
+
+      const { channels } = await LocalNotifications.listChannels();
+      const existing = channels.find((c) => c.id === REMINDER_CHANNEL_ID);
+
+      // If it exists and already has proper audible importance (>= 4), avoid duplicate creation
+      if (existing && existing.importance !== undefined && existing.importance >= 4) {
+        this.channelConfigured = true;
+        return;
+      }
+
+      // If it exists but was configured with low/silent importance (< 4), delete it first to allow upgrade
+      if (existing) {
+        try {
+          await LocalNotifications.deleteChannel({ id: REMINDER_CHANNEL_ID });
+        } catch {
+          // ignore
+        }
+      }
+
+      // Clean up legacy channels if present
+      for (const oldId of ['reminders_channel', 'reminders_audible_channel']) {
+        if (channels.some((c) => c.id === oldId)) {
+          try {
+            await LocalNotifications.deleteChannel({ id: oldId });
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Create channel with High Importance (4) - plays device's default notification sound and shows in shade
+      await LocalNotifications.createChannel({
+        id: REMINDER_CHANNEL_ID,
+        name: 'تنبيهات ومواعيد ازبطها',
+        description: 'إشعارات صوتية للتذكير بمواعيدك ومهامك اليومية',
+        importance: 4, // IMPORTANCE_HIGH: plays sound and displays notification in shade & heads-up
+        visibility: 1, // VISIBILITY_PUBLIC: shows on lockscreen
+        vibration: true,
+        lights: true,
+        lightColor: '#243B35',
+      });
+
+      this.channelConfigured = true;
+    } catch (e) {
+      console.warn('Notification channel setup failed or not supported in this environment:', e);
+    }
+  }
 
   /**
    * Load previously fired trigger IDs from IndexedDB metadata to persist across browser refreshes.
@@ -39,6 +99,7 @@ class ReminderEngineClass {
       if (Array.isArray(saved)) {
         this.firedTriggerIds = new Set(saved);
       }
+      await this.ensureNotificationChannel().catch(() => {});
     } catch {
       // Fallback to empty
     } finally {
@@ -74,6 +135,8 @@ class ReminderEngineClass {
       }
 
       if (permResult.display === 'granted') {
+        // Ensure audible channel is created immediately upon permission grant
+        await this.ensureNotificationChannel();
         // Clear local cache to force full re-sync to OS on permission grant
         await indexedDBRepository.setMetadata('native_scheduled_triggers', null);
         this.checkAndFireReminders().catch(() => {});
@@ -213,11 +276,13 @@ class ReminderEngineClass {
 
     if (triggersToSchedule.length > 0) {
         try {
+            await this.ensureNotificationChannel();
             await LocalNotifications.schedule({
                 notifications: triggersToSchedule.map(t => ({
                     id: hashStringToInt(t.id),
                     title: t.title,
                     body: t.body,
+                    channelId: REMINDER_CHANNEL_ID,
                     schedule: { at: new Date(t.triggerTime), allowWhileIdle: true },
                     extra: { entityId: t.entityId, entityType: t.entityType },
                 })),
@@ -365,12 +430,14 @@ class ReminderEngineClass {
         bodyText += `${initial}، و${last}.`;
       }
 
+      await this.ensureNotificationChannel();
       await LocalNotifications.schedule({
         notifications: [
           {
             id: DAILY_SUMMARY_NOTIFICATION_ID,
             title: "وراك بكرا 👀",
             body: bodyText,
+            channelId: REMINDER_CHANNEL_ID,
             schedule: { at: target },
             extra: { type: 'tomorrow_summary' },
           }
@@ -576,9 +643,10 @@ class ReminderEngineClass {
       try {
         new Notification(notifItem.title, {
           body: notifItem.subtitle,
-          icon: '/favicon.ico',
+          icon: '/logo.png',
           dir: 'rtl',
           lang: 'ar',
+          silent: false,
         });
       } catch {
         // Native notification delivery fallback

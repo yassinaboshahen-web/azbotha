@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { NotificationItem } from '../types';
-import { X, Bell, Check, Clock, Calendar, Volume2, ShieldCheck, Smartphone, FileJson } from 'lucide-react';
+import { X, Bell, Check, Clock, Calendar, Volume2, ShieldCheck } from 'lucide-react';
 import { sound } from '../utils/audio';
 import { EmptyState } from './EmptyState';
 import { ReminderEngine } from '../services/ReminderEngine';
-import { apiClient } from '../services/apiClient';
 
 interface NotificationSheetProps {
   isOpen: boolean;
@@ -12,8 +11,6 @@ interface NotificationSheetProps {
   notifications: NotificationItem[];
   onNotificationClick: (notif: NotificationItem) => void;
   onMarkAllRead: () => void;
-  onOpenDeviceTransfer: () => void;
-  onOpenLocalBackup: () => void;
 }
 
 export const NotificationSheet: React.FC<NotificationSheetProps> = ({
@@ -22,8 +19,6 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
   notifications,
   onNotificationClick,
   onMarkAllRead,
-  onOpenDeviceTransfer,
-  onOpenLocalBackup,
 }) => {
   const [permStatus, setPermStatus] = useState<NotificationPermission | 'unsupported'>('default');
 
@@ -78,60 +73,6 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
             className="w-8 h-8 rounded-full bg-[#E4DED4]/60 text-[#77766F] hover:text-[#243B35] flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Device Transfer Banner */}
-        {apiClient.isCloudSyncEnabled() && (
-          <div className="mb-4 p-3 rounded-2xl bg-white border border-[#E4DED4] flex items-center justify-between gap-3 shadow-2xs">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-xl bg-[#FAF3EA] text-[#C58B5C] flex items-center justify-center shrink-0">
-                <Smartphone className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-[#243B35]">
-                  عايز تنقل يومك لجهاز تاني؟
-                </p>
-                <p className="text-[11px] text-[#77766F] truncate">
-                  انقل مواعيدك ومهامك بسهولة عبر كود مؤقت
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                sound.playTap();
-                onOpenDeviceTransfer();
-              }}
-              className="px-3 py-1.5 rounded-xl bg-[#243B35] text-[#F6F3EE] text-xs font-bold hover:bg-[#1b2d28] transition-all shrink-0 cursor-pointer shadow-xs active:scale-95"
-            >
-              نقل البيانات
-            </button>
-          </div>
-        )}
-
-        {/* Local Backup & Restore Banner */}
-        <div className="mb-4 p-3 rounded-2xl bg-white border border-[#E4DED4] flex items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-xl bg-[#EBF5EE] text-[#1B4D3E] flex items-center justify-center shrink-0">
-              <FileJson className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-[#243B35]">
-                نسخ احتياطي واسترجاع محلي 💾
-              </p>
-              <p className="text-[11px] text-[#77766F] truncate">
-                احفظ نسخة من بياناتك أو استرجعها أوفلاين
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              sound.playTap();
-              onOpenLocalBackup();
-            }}
-            className="px-3 py-1.5 rounded-xl bg-[#243B35] text-[#F6F3EE] text-xs font-bold hover:bg-[#1b2d28] transition-all shrink-0 cursor-pointer shadow-xs active:scale-95"
-          >
-            التحكم بالنسخ
           </button>
         </div>
 

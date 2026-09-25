@@ -12,7 +12,7 @@ export const FirstUseIntro: React.FC<FirstUseIntroProps> = ({ onDismiss, onOpenQ
   return (
     <div
       role="region"
-      aria-label="مقدمة سريعة عن صاحب يومك"
+      aria-label="مقدمة سريعة عن ازبطها"
       className="mb-4 bg-white/90 border border-[#D8C3A5]/70 rounded-3xl p-4 sm:p-5 shadow-sm text-[#242522] relative overflow-hidden"
     >
       {/* Decorative Warm Ambient Glow */}
@@ -24,14 +24,18 @@ export const FirstUseIntro: React.FC<FirstUseIntroProps> = ({ onDismiss, onOpenQ
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* Intro Text */}
         <div className="space-y-1.5 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xl sm:text-2xl" role="img" aria-label="تحية">👋</span>
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/logo.png"
+              alt="ازبطها"
+              className="w-8 h-8 rounded-xl object-contain shadow-xs"
+            />
             <h2 className="text-base sm:text-lg font-bold text-[#243B35]">
               عامل إيه؟ يلا نشوف وراك إيه النهارده.
             </h2>
           </div>
           <p className="text-xs sm:text-sm text-[#77766F] leading-relaxed max-w-xl">
-            <strong>صاحب يومك</strong> معمول عشان يبسطلك يومك بدون دوشة — يعرض مواعيدك في سريان زمني هادي ويجاوبك بوضوح على سؤال: <span className="text-[#243B35] font-semibold">إيه اللي ورايا؟</span>
+            <strong>ازبطها</strong> معمول عشان يبسطلك يومك بدون دوشة — يعرض مواعيدك في سريان زمني هادي ويجاوبك بوضوح على سؤال: <span className="text-[#243B35] font-semibold">إيه اللي ورايا؟</span>
           </p>
 
           {/* 3 Quick Visual Value Anchors */}

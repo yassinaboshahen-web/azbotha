@@ -1,6 +1,6 @@
 {
 	"appId": "com.kareem.daycompanion",
-	"appName": "صاحب يومك",
+	"appName": "ازبطها",
 	"webDir": "dist",
 	"plugins": {
 		"LocalNotifications": {
