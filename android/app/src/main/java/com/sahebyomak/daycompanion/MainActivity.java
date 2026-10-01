@@ -1,4 +1,4 @@
-package com.kareem.daycompanion;
+package com.sahebyomak.daycompanion;
 
 import com.getcapacitor.BridgeActivity;
 
