@@ -38,48 +38,65 @@ export async function saveOrDownloadImage(
   title: string = 'جدول المواعيد'
 ): Promise<ExportResult> {
   const isNative = Capacitor.isNativePlatform();
+  const cleanFilename = filename.replace(/^azbotha-/, '').replace(/^azbotha_\d+_/, '');
+  const uniqueFilename = `azbotha_${Date.now()}_${cleanFilename}`;
 
   if (isNative) {
     try {
       const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
 
+      // Save to Android MediaStore / Pictures directory so it indexes in Gallery / Photos immediately
       const writeResult = await Filesystem.writeFile({
-        path: filename,
+        path: `Pictures/${uniqueFilename}`,
         data: base64Data,
-        directory: Directory.Cache,
+        directory: Directory.ExternalStorage,
+        recursive: true,
       });
 
       return {
         success: true,
         dataUrl,
         fileUri: writeResult.uri,
-        filename,
+        filename: uniqueFilename,
         isNative: true,
       };
-    } catch (nativeErr) {
-      console.warn('Filesystem save error, attempting browser fallback:', nativeErr);
-      downloadInBrowser(dataUrl, filename);
-      return {
-        success: true,
-        dataUrl,
-        filename,
-        isNative: false,
-      };
+    } catch (nativeErr: any) {
+      console.warn('ExternalStorage save error, trying Documents directory:', nativeErr);
+      try {
+        const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+        const writeResult = await Filesystem.writeFile({
+          path: `Pictures/${uniqueFilename}`,
+          data: base64Data,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+
+        return {
+          success: true,
+          dataUrl,
+          fileUri: writeResult.uri,
+          filename: uniqueFilename,
+          isNative: true,
+        };
+      } catch (docErr: any) {
+        console.error('Failed to save image to device storage:', docErr);
+        throw new Error(docErr?.message || nativeErr?.message || 'تعذر حفظ الصورة في معرض الصور');
+      }
     }
   }
 
   try {
-    downloadInBrowser(dataUrl, filename);
+    downloadInBrowser(dataUrl, uniqueFilename);
     return {
       success: true,
       dataUrl,
-      filename,
+      filename: uniqueFilename,
       isNative: false,
     };
   } catch (err: any) {
     return {
       success: false,
-      filename,
+      filename: uniqueFilename,
       isNative: false,
       error: err?.message || 'فشل تحميل الصورة في المتصفح',
     };

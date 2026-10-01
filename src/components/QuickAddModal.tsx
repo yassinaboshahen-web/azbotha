@@ -111,9 +111,6 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const handleEventTimeChange = (val: string) => {
     setEventTime(val);
     if (errorMessage) setErrorMessage('');
-    if (!endTimeTouched) {
-      setEventEndTime(val ? addOneHourToTime(val) : '');
-    }
   };
 
   const handleEventEndTimeChange = (val: string) => {
