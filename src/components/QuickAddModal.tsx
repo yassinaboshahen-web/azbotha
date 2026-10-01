@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CalendarEvent, TaskItem, QuickThought, EventCategory } from '../types';
 import { Clock, CheckSquare, Bookmark, X, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { sound } from '../utils/audio';
+import {
+  addOneHourToTime,
+  suggestCategoryFromTitle,
+  checkEventsTimeOverlap,
+  formatTime12h,
+  timeStringToMinutes,
+} from '../utils/dateUtils';
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -10,6 +17,7 @@ interface QuickAddModalProps {
   onAddEvent: (event: Omit<CalendarEvent, 'id' | 'completed'>) => Promise<boolean>;
   onAddTask: (task: Omit<TaskItem, 'id' | 'completed'>) => Promise<boolean>;
   onAddThought: (thought: Omit<QuickThought, 'id'>) => void;
+  existingEvents?: CalendarEvent[];
 }
 
 type AddTab = 'event' | 'task' | 'thought';
@@ -21,6 +29,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   onAddEvent,
   onAddTask,
   onAddThought,
+  existingEvents = [],
 }) => {
   const [activeTab, setActiveTab] = useState<AddTab>('event');
   const [showAdvancedEvent, setShowAdvancedEvent] = useState(false);
@@ -40,9 +49,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   // Event State
   const [eventTitle, setEventTitle] = useState('');
   const [eventDate, setEventDate] = useState(selectedDate);
-  const [eventTime, setEventTime] = useState('12:00');
-  const [eventEndTime, setEventEndTime] = useState('13:30');
-  const [eventCategory, setEventCategory] = useState<EventCategory>('lecture');
+  const [eventTime, setEventTime] = useState('');
+  const [eventEndTime, setEventEndTime] = useState('');
+  const [endTimeTouched, setEndTimeTouched] = useState(false);
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [eventCategory, setEventCategory] = useState<EventCategory>('custom');
   const [eventLocation, setEventLocation] = useState('');
   const [eventInstructor, setEventInstructor] = useState('');
   const [eventCourse, setEventCourse] = useState('');
@@ -73,6 +84,49 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Conflict warning detection with existing events on the same day
+  const conflictingEvent = useMemo(() => {
+    if (!eventTime || !eventTime.trim() || !existingEvents || existingEvents.length === 0) {
+      return null;
+    }
+    const finalDate = (eventDate && /^\d{4}-\d{2}-\d{2}$/.test(eventDate)) ? eventDate : selectedDate;
+    const sameDayEvents = existingEvents.filter(
+      (e) => e.date === finalDate && !e.completed
+    );
+    const candidate = {
+      time: eventTime.trim(),
+      endTime: eventEndTime && eventEndTime.trim() ? eventEndTime.trim() : undefined,
+    };
+    return sameDayEvents.find((e) => checkEventsTimeOverlap(candidate, e)) || null;
+  }, [eventTime, eventEndTime, eventDate, selectedDate, existingEvents]);
+
+  const handleEventTitleChange = (val: string) => {
+    setEventTitle(val);
+    if (errorMessage) setErrorMessage('');
+    if (!categoryTouched) {
+      setEventCategory(suggestCategoryFromTitle(val));
+    }
+  };
+
+  const handleEventTimeChange = (val: string) => {
+    setEventTime(val);
+    if (errorMessage) setErrorMessage('');
+    if (!endTimeTouched) {
+      setEventEndTime(val ? addOneHourToTime(val) : '');
+    }
+  };
+
+  const handleEventEndTimeChange = (val: string) => {
+    setEventEndTime(val);
+    setEndTimeTouched(true);
+    if (errorMessage) setErrorMessage('');
+  };
+
+  const handleCategoryChange = (val: EventCategory) => {
+    setEventCategory(val);
+    setCategoryTouched(true);
+  };
+
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -80,6 +134,20 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     if (!eventTitle.trim()) {
       setErrorMessage('اكتب اسم الحاجة الأول.');
       return;
+    }
+
+    if (!eventTime || !eventTime.trim()) {
+      setErrorMessage('اختار وقت البداية الأول.');
+      return;
+    }
+
+    if (eventEndTime && eventEndTime.trim()) {
+      const startMin = timeStringToMinutes(eventTime);
+      const endMin = timeStringToMinutes(eventEndTime);
+      if (endMin <= startMin) {
+        setErrorMessage('وقت النهاية لازم يكون بعد وقت البداية.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -99,8 +167,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       const success = await onAddEvent({
         title: eventTitle.trim(),
         date: finalDate,
-        time: eventTime || '12:00',
-        endTime: eventEndTime || undefined,
+        time: eventTime.trim(),
+        endTime: eventEndTime && eventEndTime.trim() ? eventEndTime.trim() : undefined,
         category: eventCategory,
         categoryLabel: categoryLabels[eventCategory] || 'معاد',
         location: eventLocation.trim() || undefined,
@@ -183,7 +251,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const resetForms = () => {
     setEventTitle('');
     setEventDate(selectedDate);
-    setTaskDate(selectedDate);
+    setEventTime('');
+    setEventEndTime('');
+    setEndTimeTouched(false);
+    setCategoryTouched(false);
+    setEventCategory('custom');
     setEventLocation('');
     setEventInstructor('');
     setEventCourse('');
@@ -299,10 +371,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
               <input
                 type="text"
                 value={eventTitle}
-                onChange={(e) => {
-                  setEventTitle(e.target.value);
-                  if (errorMessage) setErrorMessage('');
-                }}
+                onChange={(e) => handleEventTitleChange(e.target.value)}
                 placeholder="مثال: محاضرة ميكانيكا، ميتينج الشغل، جيم..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
               />
@@ -323,12 +392,12 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#243B35] mb-1.5">
-                  من الساعة
+                  من الساعة *
                 </label>
                 <input
                   type="time"
                   value={eventTime}
-                  onChange={(e) => setEventTime(e.target.value)}
+                  onChange={(e) => handleEventTimeChange(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-[#E4DED4] text-xs sm:text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
                 />
               </div>
@@ -340,11 +409,21 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                 <input
                   type="time"
                   value={eventEndTime}
-                  onChange={(e) => setEventEndTime(e.target.value)}
+                  onChange={(e) => handleEventEndTimeChange(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-[#E4DED4] text-xs sm:text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
                 />
               </div>
             </div>
+
+            {/* Non-blocking conflict warning */}
+            {conflictingEvent && (
+              <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-900 text-xs font-semibold flex items-center gap-1.5">
+                <span className="text-sm">⚠️</span>
+                <span>
+                  بيتعارض مع: {conflictingEvent.title} ({formatTime12h(conflictingEvent.time)})
+                </span>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -353,16 +432,16 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                 </label>
                 <select
                   value={eventCategory}
-                  onChange={(e) => setEventCategory(e.target.value as EventCategory)}
+                  onChange={(e) => handleCategoryChange(e.target.value as EventCategory)}
                   className="w-full px-3 py-2.5 rounded-xl bg-white border border-[#E4DED4] text-xs sm:text-sm text-[#242522] focus:outline-none focus:border-[#243B35]"
                 >
+                  <option value="custom">معاد عام</option>
                   <option value="lecture">محاضرة</option>
                   <option value="section">سكشن</option>
                   <option value="meeting">ميتينج</option>
                   <option value="workout">تمرين وجيم</option>
                   <option value="personal">شخصي وخروجات</option>
                   <option value="study">مذاكرة وبحث</option>
-                  <option value="custom">معاد عام</option>
                 </select>
               </div>
 

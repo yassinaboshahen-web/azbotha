@@ -1,13 +1,24 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 import { installationService } from '../services/installationService';
+import { createRateLimiter } from '../middleware/rateLimit';
 import { db } from '../db/client';
 import crypto from 'crypto';
 
 const router = Router();
 
-// Simple in-memory rate limiter for demo purpose
-const rateLimit = new Map<string, { count: number; windowStart: number }>();
+// Rate limiters for transfer claim: 5 attempts per minute and 20 attempts per hour
+const claimPerMinuteLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: 'تجاوزت الحد المسموح به من المحاولات (5 محاولات في الدقيقة).',
+});
+
+const claimPerHourLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  message: 'تجاوزت الحد المسموح به من المحاولات (20 محاولة في الساعة).',
+});
 
 function generateTransferCode(): string {
   // 8 digits
@@ -17,6 +28,7 @@ function generateTransferCode(): string {
 /**
  * POST /api/sync/transfer/generate
  * Generates a temporary, time-limited (15 mins), revocable transfer code for the current anonymous user.
+ * Deletes any previous or expired codes for this user to guarantee only 1 active code per user.
  */
 router.post('/generate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -26,14 +38,20 @@ router.post('/generate', requireAuth, async (req: AuthenticatedRequest, res: Res
       return;
     }
 
+    // Delete any previous or expired transfer codes for this user (one active code per user)
+    await db.execute({
+      sql: 'DELETE FROM transfer_codes WHERE anonymous_user_id = ? OR expires_at < datetime("now")',
+      args: [anonymous_user_id],
+    });
+
     const code = generateTransferCode();
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const expiresInMinutes = 15;
     const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000).toISOString();
 
     await db.execute({
-        sql: 'INSERT INTO transfer_codes (code_hash, anonymous_user_id, expires_at) VALUES (?, ?, ?)',
-        args: [codeHash, anonymous_user_id, expiresAt]
+      sql: 'INSERT INTO transfer_codes (code_hash, anonymous_user_id, expires_at) VALUES (?, ?, ?)',
+      args: [codeHash, anonymous_user_id, expiresAt],
     });
 
     res.json({
@@ -42,69 +60,53 @@ router.post('/generate', requireAuth, async (req: AuthenticatedRequest, res: Res
       expiresInMinutes,
     });
   } catch (err) {
+    console.error('Transfer generate API Error:', err);
     res.status(500).json({ error: 'TransferError', message: 'فشل إنشاء كود النقل.' });
   }
 });
 
 /**
  * POST /api/sync/transfer/claim
- * Claims a transfer code and returns the source anonymous user ID.
+ * Claims a transfer code atomically and generates a secure installation token for the new device.
+ * Enforces rate limiting (5/min, 20/hr) and single-use atomic consumption.
  */
-router.post('/claim', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/claim', claimPerMinuteLimiter, claimPerHourLimiter, async (req: Request, res: Response) => {
   try {
-    const ip = req.ip || 'unknown';
-    const now = Date.now();
-    const limit = rateLimit.get(ip) || { count: 0, windowStart: now };
-
-    if (now - limit.windowStart > 60000) {
-        limit.count = 0;
-        limit.windowStart = now;
-    }
-
-    if (limit.count >= 5) {
-        res.status(429).json({ error: 'TooManyRequests', message: 'حد أقصى للمحاولات.' });
-        return;
-    }
-    limit.count++;
-    rateLimit.set(ip, limit);
-
     const { code } = req.body || {};
-    if (!code || typeof code !== 'string') {
+    if (!code || typeof code !== 'string' || code.trim().length === 0) {
       res.status(400).json({ error: 'ValidationError', message: 'يجب إدخال كود النقل.' });
       return;
     }
 
     const codeHash = crypto.createHash('sha256').update(code.trim()).digest('hex');
-    
+    const nowIso = new Date().toISOString();
+
+    // Atomic consumption: DELETE and RETURN anonymous_user_id in a single write statement
     const result = await db.execute({
-        sql: 'SELECT anonymous_user_id, expires_at FROM transfer_codes WHERE code_hash = ?',
-        args: [codeHash]
+      sql: 'DELETE FROM transfer_codes WHERE code_hash = ? AND expires_at >= ? RETURNING anonymous_user_id',
+      args: [codeHash, nowIso],
     });
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: 'NotFoundError', message: 'كود النقل غير صحيح.' });
+      res.status(400).json({ error: 'TransferError', message: 'كود النقل غير صحيح أو انتهت صلاحيته أو تم استخدامه بالفعل.' });
       return;
     }
 
-    const entry = result.rows[0];
-    if (new Date(entry.expires_at as string).getTime() < Date.now()) {
-      await db.execute({ sql: 'DELETE FROM transfer_codes WHERE code_hash = ?', args: [codeHash] });
-      res.status(400).json({ error: 'ExpiredError', message: 'انتهت صلاحية كود النقل.' });
-      return;
-    }
+    const sourceUserId = String(result.rows[0].anonymous_user_id);
 
-    // Revoke code immediately upon claim (single use)
-    await db.execute({ sql: 'DELETE FROM transfer_codes WHERE code_hash = ?', args: [codeHash] });
+    // Log the successful transfer event WITHOUT logging the secret code
+    console.log(`[Transfer] Successfully claimed transfer code atomically for anonymous user: ${sourceUserId}`);
 
     // Generate a secure server-issued installation token for the new device
-    const token = await installationService.createInstallation(entry.anonymous_user_id as string);
+    const token = await installationService.createInstallation(sourceUserId);
 
     res.json({
       success: true,
-      anonymous_user_id: entry.anonymous_user_id,
+      anonymous_user_id: sourceUserId,
       installationCredential: token,
     });
   } catch (err) {
+    console.error('Transfer claim API Error:', err);
     res.status(500).json({ error: 'TransferError', message: 'فشل استعادة البيانات عبر الكود.' });
   }
 });

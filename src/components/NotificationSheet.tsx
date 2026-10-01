@@ -1,6 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { NotificationItem } from '../types';
-import { X, Bell, Check, Clock, Calendar, Volume2, ShieldCheck } from 'lucide-react';
+import {
+  X,
+  Bell,
+  Check,
+  Clock,
+  Calendar,
+  Volume2,
+  ShieldCheck,
+  AlertTriangle,
+  Settings,
+  BatteryCharging,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { sound } from '../utils/audio';
 import { EmptyState } from './EmptyState';
 import { ReminderEngine } from '../services/ReminderEngine';
@@ -20,12 +35,36 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
   onNotificationClick,
   onMarkAllRead,
 }) => {
-  const [permStatus, setPermStatus] = useState<NotificationPermission | 'unsupported'>('default');
+  const [permStatus, setPermStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
+  const [exactAlarmStatus, setExactAlarmStatus] = useState<'granted' | 'denied' | 'unsupported'>('granted');
+  const [showBatteryHelp, setShowBatteryHelp] = useState(false);
+  const [testNotificationState, setTestNotificationState] = useState<{
+    status: 'idle' | 'scheduling' | 'success' | 'error';
+    message?: string;
+  }>({ status: 'idle' });
+
+  const testTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refreshPermissions = async () => {
+    const [pStatus, eStatus] = await Promise.all([
+      ReminderEngine.getNotificationPermissionStatus(),
+      ReminderEngine.getExactAlarmStatus(),
+    ]);
+    setPermStatus(pStatus);
+    setExactAlarmStatus(eStatus);
+  };
 
   useEffect(() => {
     if (isOpen) {
-      setPermStatus(ReminderEngine.getNotificationPermissionStatus());
+      refreshPermissions();
+      setTestNotificationState({ status: 'idle' });
     }
+    return () => {
+      if (testTimerRef.current) {
+        clearTimeout(testTimerRef.current);
+        testTimerRef.current = null;
+      }
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -39,8 +78,37 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
 
   const handleRequestPermission = async () => {
     sound.playTap();
-    const granted = await ReminderEngine.requestNotificationPermission();
-    setPermStatus(granted ? 'granted' : ReminderEngine.getNotificationPermissionStatus());
+    await ReminderEngine.requestNotificationPermission();
+    await refreshPermissions();
+  };
+
+  const handleFixExactAlarm = async () => {
+    sound.playTap();
+    await ReminderEngine.changeExactNotificationSetting();
+    await refreshPermissions();
+  };
+
+  const handleTestNotification = async () => {
+    sound.playPop();
+    setTestNotificationState({ status: 'scheduling' });
+    if (testTimerRef.current) clearTimeout(testTimerRef.current);
+
+    const result = await ReminderEngine.scheduleTestNotification(10);
+    if (result.success) {
+      setTestNotificationState({
+        status: 'success',
+        message: 'تم جدولة إشعار تجريبي بعد 10 ثوانٍ! اخرج من التطبيق أو اقفل الشاشة لتجربته 🔔',
+      });
+      testTimerRef.current = setTimeout(() => {
+        setTestNotificationState({ status: 'idle' });
+        testTimerRef.current = null;
+      }, 9000);
+    } else {
+      setTestNotificationState({
+        status: 'error',
+        message: result.error || 'تعذر جدولة الإشعار التجريبي. اتأكد من تفعيل الأذونات.',
+      });
+    }
   };
 
   if (!isOpen) return null;
@@ -54,11 +122,11 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
       />
 
       {/* Sheet Content */}
-      <div className="relative z-10 w-full sm:max-w-md bg-[#F6F3EE] rounded-t-3xl sm:rounded-3xl border border-[#E4DED4] shadow-2xl p-5 sm:p-6 max-h-[85vh] overflow-y-auto">
+      <div className="relative z-10 w-full sm:max-w-lg bg-[#F6F3EE] rounded-t-3xl sm:rounded-3xl border border-[#E4DED4] shadow-2xl p-5 sm:p-6 max-h-[88vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-[#E4DED4]">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-[#243B35] text-[#D8C3A5] flex items-center justify-center">
+            <div className="w-7 h-7 rounded-full bg-[#243B35] text-[#D8C3A5] flex items-center justify-center shadow-xs">
               <Bell className="w-3.5 h-3.5" />
             </div>
             <h2 className="text-base sm:text-lg font-bold text-[#243B35]">
@@ -70,23 +138,48 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
               sound.playTap();
               onClose();
             }}
+            aria-label="إغلاق التنبيهات"
             className="w-8 h-8 rounded-full bg-[#E4DED4]/60 text-[#77766F] hover:text-[#243B35] flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Optional Browser Permission Banner (Opt-in) */}
-        {permStatus !== 'granted' && permStatus !== 'unsupported' && (
+        {/* 1. Notifications Denied / Prompt Persistent Banner */}
+        {permStatus === 'denied' && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-[#FFF3ED] border border-[#F4C4B4] space-y-2">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-[#B86B61] shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-[#8C3A30]">
+                  إذن الإشعارات غير مفعّل على جهازك
+                </p>
+                <p className="text-[11px] text-[#77766F] leading-relaxed mt-0.5">
+                  لتفعيل التنبيهات: افتح <strong>إعدادات الهاتف</strong> &gt; <strong>التطبيقات</strong> &gt; <strong>ازبطها</strong> &gt; <strong>الإشعارات</strong> واختر <strong>سماح</strong>.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleRequestPermission}
+                className="px-3 py-1.5 rounded-xl bg-[#8C3A30] text-white text-xs font-bold hover:bg-[#722e26] transition-all cursor-pointer shadow-xs active:scale-95"
+              >
+                إعادة طلب الإذن
+              </button>
+            </div>
+          </div>
+        )}
+
+        {permStatus === 'prompt' && (
           <div className="mb-4 p-3 rounded-2xl bg-[#EAF3EE] border border-[#C7E0D3] flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <Volume2 className="w-4 h-4 text-[#2E6B56] shrink-0" />
               <div className="min-w-0">
                 <p className="text-xs font-bold text-[#243B35] truncate">
-                  تفعيل إشعارات المتصفح
+                  تفعيل التنبيهات الصوتية والإشعارات
                 </p>
                 <p className="text-[11px] text-[#77766F]">
-                  لتصلك تذكيرات المواعيد والمهام في موعدها
+                  لتصلك تذكيرات المواعيد والمهام بدقة
                 </p>
               </div>
             </div>
@@ -99,12 +192,138 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
           </div>
         )}
 
-        {permStatus === 'granted' && (
-          <div className="mb-3 px-3 py-1.5 rounded-xl bg-white/60 border border-[#E4DED4] flex items-center justify-between text-[11px] text-[#2E6B56] font-medium">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#2E6B56]" />
-              إشعارات المتصفح مفعلة
-            </span>
+        {/* 2. Exact Alarm Missing Banner (Android 12+) */}
+        {permStatus === 'granted' && exactAlarmStatus === 'denied' && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-[#FFF8E7] border border-[#E8D4A2] space-y-2">
+            <div className="flex items-start gap-2.5">
+              <Clock className="w-4 h-4 text-[#C58B5C] shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-[#243B35]">
+                  إذن المنبّه الدقيق غير مفعّل (أندرويد 12+)
+                </p>
+                <p className="text-[11px] text-[#77766F] leading-relaxed mt-0.5">
+                  التنبيهات شغالة بس ممكن تتأخر شوية بسبب توفير الطاقة في أندرويد. عشان ترن في الدقيقة بالظبط، اسمح بإذن المنبّه.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleFixExactAlarm}
+                className="px-3 py-1.5 rounded-xl bg-[#C58B5C] text-white text-xs font-bold hover:bg-[#b0784a] transition-all cursor-pointer shadow-xs active:scale-95"
+              >
+                تفعيل المنبّه الدقيق
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Action Tools: Test Notification & Battery Help */}
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* Test Notification Button */}
+          <button
+            type="button"
+            onClick={handleTestNotification}
+            disabled={testNotificationState.status === 'scheduling'}
+            className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs group"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-[#243B35]/10 text-[#243B35] flex items-center justify-center shrink-0">
+                <Volume2 className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-xs font-bold text-[#243B35] block truncate">
+                  جرّب التنبيه دلوقتي
+                </span>
+                <span className="text-[10px] text-[#77766F] block truncate">
+                  تنبيه تجريبي بعد 10 ثوانٍ
+                </span>
+              </div>
+            </div>
+            <Zap className="w-3.5 h-3.5 text-[#C58B5C] group-hover:scale-110 transition-transform shrink-0" />
+          </button>
+
+          {/* Battery Help Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTap();
+              setShowBatteryHelp(!showBatteryHelp);
+            }}
+            className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-[#6F8F78]/15 text-[#2E6B56] flex items-center justify-center shrink-0">
+                <BatteryCharging className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-xs font-bold text-[#243B35] block truncate">
+                  لو التنبيهات بتتأخر؟
+                </span>
+                <span className="text-[10px] text-[#77766F] block truncate">
+                  حلول توفير بطارية شاومي وسامسونج
+                </span>
+              </div>
+            </div>
+            {showBatteryHelp ? (
+              <ChevronUp className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
+            )}
+          </button>
+        </div>
+
+        {/* Test Notification Feedback Message */}
+        {testNotificationState.status === 'success' && (
+          <div className="mb-4 p-3 rounded-2xl bg-[#EAF3EE] border border-[#2E6B56]/30 text-xs text-[#2E6B56] font-medium flex items-center gap-2 animate-fadeIn">
+            <Check className="w-4 h-4 shrink-0" />
+            <span>{testNotificationState.message}</span>
+          </div>
+        )}
+
+        {testNotificationState.status === 'error' && (
+          <div className="mb-4 p-3 rounded-2xl bg-[#FFF3ED] border border-[#B86B61]/30 text-xs text-[#8C3A30] font-medium flex items-center gap-2 animate-fadeIn">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{testNotificationState.message}</span>
+          </div>
+        )}
+
+        {/* 4. Battery Optimization Guidance Accordion */}
+        {showBatteryHelp && (
+          <div className="mb-4 p-4 rounded-2xl bg-white border border-[#D8C3A5] space-y-3 text-[#242522] animate-fadeIn text-xs leading-relaxed">
+            <div className="flex items-center gap-2 font-bold text-[#243B35] border-b border-[#E4DED4] pb-2">
+              <ShieldCheck className="w-4 h-4 text-[#2E6B56]" />
+              <span>دليل استثناء التطبيق من توفير البطارية الصارم:</span>
+            </div>
+
+            <div className="space-y-2.5 text-[11px]">
+              <div>
+                <strong className="text-[#243B35] block mb-0.5">🔹 شاومي / بوكو / ريدمي (Xiaomi / MIUI / HyperOS):</strong>
+                <p className="text-[#77766F]">
+                  اضغط مطولاً على أيقونة ازبطها &gt; معلومات التطبيق &gt; فعّل <strong>التشغيل التلقائي (Autostart)</strong>، ومن <strong>موفر البطارية</strong> اختر <strong>بلا قيود (No restrictions)</strong>.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-[#243B35] block mb-0.5">🔹 سامسونج (Samsung OneUI):</strong>
+                <p className="text-[#77766F]">
+                  الضبط &gt; التطبيقات &gt; ازبطها &gt; البطارية &gt; اختر <strong>غير مقيد (Unrestricted)</strong> عشان النظام ميموتش التنبيهات في الخلفية.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-[#243B35] block mb-0.5">🔹 أوبو / ريلمي (Oppo / Realme / ColorOS):</strong>
+                <p className="text-[#77766F]">
+                  معلومات التطبيق &gt; استخدام البطارية &gt; السماح بالنشاط في الخلفية والسماح بالبدء التلقائي.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-[#243B35] block mb-0.5">🔹 هواوي (Huawei):</strong>
+                <p className="text-[#77766F]">
+                  الإعدادات &gt; البطارية &gt; تشغيل التطبيقات &gt; ازبطها &gt; حوّلها إلى إدارة يدوية (فعّل التشغيل في الخلفية).
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

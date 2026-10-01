@@ -134,8 +134,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
 
         if (operationType === 'create') {
           await db.execute({
-            sql: `INSERT INTO tasks (id, anonymous_user_id, title, description, due_date, due_time, priority, status, completed_at, created_at, updated_at, category, reminder)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sql: `INSERT INTO tasks (id, anonymous_user_id, title, description, due_date, due_time, priority, status, completed_at, created_at, updated_at, category, reminder, deleted_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                   ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     description = excluded.description,
@@ -146,7 +146,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
                     completed_at = excluded.completed_at,
                     updated_at = excluded.updated_at,
                     category = excluded.category,
-                    reminder = excluded.reminder
+                    reminder = excluded.reminder,
+                    deleted_at = NULL
                   WHERE tasks.anonymous_user_id = ?`,
             args: [
               taskId,
@@ -177,7 +178,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
                       completed_at = COALESCE(?, completed_at),
                       updated_at = ?,
                       category = COALESCE(?, category),
-                      reminder = COALESCE(?, reminder)
+                      reminder = COALESCE(?, reminder),
+                      deleted_at = NULL
                   WHERE id = ? AND anonymous_user_id = ?`,
             args: [
               payload.title !== undefined ? String(payload.title) : null,
@@ -195,10 +197,18 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
             ],
           });
         } else if (operationType === 'delete') {
-          await db.execute({
-            sql: 'DELETE FROM tasks WHERE id = ? AND anonymous_user_id = ?',
-            args: [taskId, anonUserId],
+          const resUpd = await db.execute({
+            sql: 'UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND anonymous_user_id = ?',
+            args: [now, now, taskId, anonUserId],
           });
+          if (resUpd.rowsAffected === 0) {
+            await db.execute({
+              sql: `INSERT INTO tasks (id, anonymous_user_id, title, status, created_at, updated_at, deleted_at)
+                    VALUES (?, ?, 'Deleted Task', 'deleted', ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
+              args: [taskId, anonUserId, now, now, now],
+            });
+          }
         }
       } else if (entityType === 'event') {
         const eventId = String(entityId || payload.id || `evt_${Date.now()}`);
@@ -209,8 +219,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
 
         if (operationType === 'create') {
           await db.execute({
-            sql: `INSERT INTO events (id, anonymous_user_id, title, date, start_time, end_time, location, doctor_or_ta, course, notes, status, created_at, updated_at, category, category_label, reminder)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sql: `INSERT INTO events (id, anonymous_user_id, title, date, start_time, end_time, location, doctor_or_ta, course, notes, status, created_at, updated_at, category, category_label, reminder, deleted_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                   ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     date = excluded.date,
@@ -224,7 +234,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
                     updated_at = excluded.updated_at,
                     category = excluded.category,
                     category_label = excluded.category_label,
-                    reminder = excluded.reminder
+                    reminder = excluded.reminder,
+                    deleted_at = NULL
                   WHERE events.anonymous_user_id = ?`,
             args: [
               eventId,
@@ -261,7 +272,8 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
                       updated_at = ?,
                       category = COALESCE(?, category),
                       category_label = COALESCE(?, category_label),
-                      reminder = COALESCE(?, reminder)
+                      reminder = COALESCE(?, reminder),
+                      deleted_at = NULL
                   WHERE id = ? AND anonymous_user_id = ?`,
             args: [
               payload.title !== undefined ? String(payload.title) : null,
@@ -282,10 +294,18 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
             ],
           });
         } else if (operationType === 'delete') {
-          await db.execute({
-            sql: 'DELETE FROM events WHERE id = ? AND anonymous_user_id = ?',
-            args: [eventId, anonUserId],
+          const resUpd = await db.execute({
+            sql: 'UPDATE events SET deleted_at = ?, updated_at = ? WHERE id = ? AND anonymous_user_id = ?',
+            args: [now, now, eventId, anonUserId],
           });
+          if (resUpd.rowsAffected === 0) {
+            await db.execute({
+              sql: `INSERT INTO events (id, anonymous_user_id, title, date, start_time, created_at, updated_at, deleted_at)
+                    VALUES (?, ?, 'Deleted Event', '1970-01-01', '00:00', ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
+              args: [eventId, anonUserId, now, now, now],
+            });
+          }
         }
       } else if (entityType === 'reminder') {
         const reminderId = String(entityId || payload.id || `rem_${Date.now()}`);
@@ -296,15 +316,17 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
 
         if (operationType === 'create' || operationType === 'update') {
           await db.execute({
-            sql: `INSERT INTO reminders (id, anonymous_user_id, entity_id, entity_type, reminder_type, trigger_configuration, enabled, created_at, updated_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sql: `INSERT INTO reminders (id, anonymous_user_id, entity_id, entity_type, reminder_type, trigger_configuration, enabled, created_at, updated_at, deleted_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                   ON CONFLICT(id) DO UPDATE SET
                     entity_id = excluded.entity_id,
                     entity_type = excluded.entity_type,
                     reminder_type = excluded.reminder_type,
                     trigger_configuration = excluded.trigger_configuration,
                     enabled = excluded.enabled,
-                    updated_at = excluded.updated_at`,
+                    updated_at = excluded.updated_at,
+                    deleted_at = NULL
+                  WHERE reminders.anonymous_user_id = ?`,
             args: [
               reminderId,
               anonUserId,
@@ -315,13 +337,22 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
               payload.enabled !== undefined ? (payload.enabled ? 1 : 0) : 1,
               payload.created_at || now,
               now,
+              anonUserId,
             ],
           });
         } else if (operationType === 'delete') {
-          await db.execute({
-            sql: 'DELETE FROM reminders WHERE id = ? AND (anonymous_user_id = ? OR anonymous_user_id = ?)',
-            args: [reminderId, anonUserId, anonUserId],
+          const resUpd = await db.execute({
+            sql: 'UPDATE reminders SET deleted_at = ?, updated_at = ? WHERE id = ? AND anonymous_user_id = ?',
+            args: [now, now, reminderId, anonUserId],
           });
+          if (resUpd.rowsAffected === 0) {
+            await db.execute({
+              sql: `INSERT INTO reminders (id, anonymous_user_id, created_at, updated_at, deleted_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`,
+              args: [reminderId, anonUserId, now, now, now],
+            });
+          }
         }
       } else if (entityType === 'user_preferences' || entityType === 'preference') {
         await db.execute({
@@ -346,10 +377,33 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
       } else if (entityType === 'notification') {
         const notifId = String(entityId || payload.id);
         if (isValidId(notifId)) {
-          await db.execute({
-            sql: 'UPDATE notifications SET read = ? WHERE id = ? AND (anonymous_user_id = ? OR anonymous_user_id = ?)',
-            args: [payload.read ? 1 : 0, notifId, anonUserId, anonUserId],
-          });
+          if (operationType === 'delete') {
+            await db.execute({
+              sql: 'UPDATE notifications SET deleted_at = ?, updated_at = ? WHERE id = ? AND anonymous_user_id = ?',
+              args: [now, now, notifId, anonUserId],
+            });
+          } else {
+            await db.execute({
+              sql: `INSERT INTO notifications (id, anonymous_user_id, type, title, body, read, created_at, updated_at, deleted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    ON CONFLICT(id) DO UPDATE SET
+                      read = excluded.read,
+                      updated_at = excluded.updated_at,
+                      deleted_at = NULL
+                    WHERE notifications.anonymous_user_id = ?`,
+              args: [
+                notifId,
+                anonUserId,
+                payload.type || 'general',
+                payload.title || 'تنبيه',
+                payload.body || payload.subtitle || '',
+                payload.read ? 1 : 0,
+                payload.created_at || now,
+                now,
+                anonUserId,
+              ],
+            });
+          }
         }
       }
 
@@ -365,44 +419,80 @@ router.post('/push', requireAuth, async (req: AuthenticatedRequest, res: Respons
     console.error('[Sync API Push Error]:', err instanceof Error ? err.message : String(err));
     res.status(500).json({
       error: 'SyncError',
-      message: 'تعذر تع معالجة عمليات المزامنة.',
+      message: 'تعذر معالجة عمليات المزامنة.',
     });
   }
 });
 
 /**
  * POST /api/sync/pull
- * Retrieve cloud records associated with the authenticated anonymous installation identity.
+ * Incremental cloud pull with since-timestamp cursor and pagination support.
  */
 router.post('/pull', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const anonUserId = req.user!.anonymous_user_id || req.user!.id;
+    const body = req.body || {};
+    const since = body.since || body.last_pulled_at || null;
+    const limit = Math.min(Number(body.limit) || 200, 500);
+
+    const nowIso = new Date().toISOString();
+
+    let taskSql = 'SELECT * FROM tasks WHERE anonymous_user_id = ?';
+    let eventSql = 'SELECT * FROM events WHERE anonymous_user_id = ?';
+    let remSql = 'SELECT * FROM reminders WHERE anonymous_user_id = ?';
+    let notifSql = 'SELECT * FROM notifications WHERE anonymous_user_id = ?';
+    let prefSql = 'SELECT * FROM user_preferences WHERE anonymous_user_id = ?';
+
+    const baseArgs: any[] = [anonUserId];
+    const taskArgs = [...baseArgs];
+    const eventArgs = [...baseArgs];
+    const remArgs = [...baseArgs];
+    const notifArgs = [...baseArgs];
+    const prefArgs = [...baseArgs];
+
+    if (since && typeof since === 'string' && isValidDateString(since)) {
+      taskSql += ' AND updated_at > ?';
+      taskArgs.push(since);
+
+      eventSql += ' AND updated_at > ?';
+      eventArgs.push(since);
+
+      remSql += ' AND updated_at > ?';
+      remArgs.push(since);
+
+      notifSql += ' AND updated_at > ?';
+      notifArgs.push(since);
+
+      prefSql += ' AND updated_at > ?';
+      prefArgs.push(since);
+    }
+
+    taskSql += ' ORDER BY updated_at ASC LIMIT ?';
+    taskArgs.push(limit);
+
+    eventSql += ' ORDER BY updated_at ASC LIMIT ?';
+    eventArgs.push(limit);
+
+    remSql += ' ORDER BY updated_at ASC LIMIT ?';
+    remArgs.push(limit);
+
+    notifSql += ' ORDER BY updated_at ASC LIMIT ?';
+    notifArgs.push(limit);
 
     const [tasks, events, reminders, notifications, prefs] = await Promise.all([
-      queryMany<Record<string, any>>({
-        sql: 'SELECT * FROM tasks WHERE anonymous_user_id = ? ORDER BY created_at DESC',
-        args: [anonUserId],
-      }),
-      queryMany<Record<string, any>>({
-        sql: 'SELECT * FROM events WHERE anonymous_user_id = ? ORDER BY date ASC, start_time ASC',
-        args: [anonUserId],
-      }),
-      queryMany<Record<string, any>>({
-        sql: 'SELECT * FROM reminders WHERE anonymous_user_id = ? ORDER BY created_at DESC',
-        args: [anonUserId],
-      }),
-      queryMany<Record<string, any>>({
-        sql: 'SELECT * FROM notifications WHERE anonymous_user_id = ? ORDER BY created_at DESC',
-        args: [anonUserId],
-      }),
-      queryMany<Record<string, any>>({
-        sql: 'SELECT * FROM user_preferences WHERE anonymous_user_id = ?',
-        args: [anonUserId],
-      }),
+      queryMany<Record<string, any>>({ sql: taskSql, args: taskArgs }),
+      queryMany<Record<string, any>>({ sql: eventSql, args: eventArgs }),
+      queryMany<Record<string, any>>({ sql: remSql, args: remArgs }),
+      queryMany<Record<string, any>>({ sql: notifSql, args: notifArgs }),
+      queryMany<Record<string, any>>({ sql: prefSql, args: prefArgs }),
     ]);
 
+    const hasMore = tasks.length >= limit || events.length >= limit || reminders.length >= limit || notifications.length >= limit;
+
     res.json({
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
+      since: since || null,
+      hasMore,
       changes: {
         tasks,
         events,

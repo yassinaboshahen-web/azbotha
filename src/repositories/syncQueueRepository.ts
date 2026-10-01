@@ -146,4 +146,44 @@ export const syncQueueRepository = {
       }
     }
   },
+
+  /**
+   * Coalesces and deduplicates pending sync operations for the same entity locally.
+   */
+  coalesceSyncOps(ops: SyncOperationRecord[]): SyncOperationRecord[] {
+    const map = new Map<string, SyncOperationRecord>();
+    const sorted = [...ops].sort((a, b) => (a.created_at || a.timestamp || '').localeCompare(b.created_at || b.timestamp || ''));
+
+    for (const op of sorted) {
+      const key = `${op.entity_type}:${op.entity_id}`;
+      const existing = map.get(key);
+
+      if (!existing) {
+        map.set(key, { ...op });
+        continue;
+      }
+
+      const exKind = existing.operation_type || existing.action;
+      const curKind = op.operation_type || op.action;
+
+      if (exKind === 'create' && curKind === 'update') {
+        existing.payload = { ...existing.payload, ...op.payload };
+        existing.updated_at = op.updated_at || new Date().toISOString();
+      } else if (exKind === 'create' && curKind === 'delete') {
+        map.delete(key);
+      } else if (exKind === 'update' && curKind === 'update') {
+        existing.payload = { ...existing.payload, ...op.payload };
+        existing.updated_at = op.updated_at || new Date().toISOString();
+      } else if (exKind === 'update' && curKind === 'delete') {
+        existing.operation_type = 'delete';
+        existing.action = 'delete';
+        existing.payload = op.payload;
+        existing.updated_at = op.updated_at || new Date().toISOString();
+      } else {
+        map.set(key, { ...op });
+      }
+    }
+
+    return Array.from(map.values());
+  },
 };

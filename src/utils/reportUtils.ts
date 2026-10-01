@@ -1,5 +1,5 @@
 import { CalendarEvent, TaskItem, EventCategory } from '../types';
-import { getTodayDateString, parseDateString } from './dateUtils';
+import { getTodayDateString, parseDateString, getTaskDate } from './dateUtils';
 
 export interface ReportMetrics {
   totalEvents: number;
@@ -35,7 +35,7 @@ export function calculateReportMetrics(
 ): ReportMetrics {
   const filteredEvents = events.filter(e => e.date >= startDateStr && e.date <= endDateStr);
   const filteredTasks = tasks.filter(t => {
-    const d = t.due_date || t.date;
+    const d = getTaskDate(t);
     return d && d >= startDateStr && d <= endDateStr;
   });
 
@@ -51,7 +51,7 @@ export function calculateReportMetrics(
 
   // Overdue calculation (global check, or range check? User said "due_date before today and not finished")
   const overdueTasksCount = tasks.filter(t => {
-    const d = t.due_date || t.date;
+    const d = getTaskDate(t);
     return d && d < todayStr && !t.completed && t.status !== 'completed';
   }).length;
 
@@ -65,7 +65,7 @@ export function calculateReportMetrics(
   });
 
   filteredTasks.forEach(t => {
-    const d = t.due_date || t.date;
+    const d = getTaskDate(t);
     if (d) {
       if (!dailyDistribution[d]) dailyDistribution[d] = { events: 0, tasks: 0 };
       dailyDistribution[d].tasks++;
@@ -120,7 +120,7 @@ export function calculateReportMetrics(
 export function formatReportSummaryText(metrics: ReportMetrics, periodName: string): string {
   const { completionRate, totalEvents, totalTasks, busiestDay, overdueTasksCount } = metrics;
   
-  let text = `📊 ملخص ${periodName} لـ "صاحب يومك":\n\n`;
+  let text = `📊 ملخص ${periodName} لـ "ازبطها":\n\n`;
   
   if (totalEvents + totalTasks === 0) {
     return `${text}الفترة دي كانت هادية جداً، مفيش مواعيد أو مهام مسجلة. ريح دماغك! 😌`;

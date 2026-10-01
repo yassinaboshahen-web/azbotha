@@ -1,47 +1,62 @@
 import React from 'react';
 import { Bell, Sparkles } from 'lucide-react';
 import { sound } from '../utils/audio';
+import { SyncStatusBadge } from './SyncStatusBadge';
 
 interface HeaderProps {
   unreadNotifsCount: number;
   onOpenNotifications: () => void;
   soundEnabled?: boolean;
   onToggleSound?: () => void;
-  isToday: boolean;
-  onJumpToToday: () => void;
+  isToday?: boolean;
+  onJumpToToday?: () => void;
+  periodType?: 'day' | 'week' | 'month';
+  isCurrentPeriod?: boolean;
+  onJumpToCurrent?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   unreadNotifsCount,
   onOpenNotifications,
-  isToday,
+  isToday = true,
   onJumpToToday,
+  periodType = 'day',
+  isCurrentPeriod,
+  onJumpToCurrent,
 }) => {
+  const isCurrent = isCurrentPeriod !== undefined ? isCurrentPeriod : isToday;
+  const jumpHandler = onJumpToCurrent || onJumpToToday;
+
   return (
     <header className="sticky top-0 z-30 bg-[#F6F3EE]/90 backdrop-blur-md border-b border-[#E4DED4] px-4 sm:px-8 py-3 transition-all">
       <div className="max-w-4xl mx-auto flex items-center justify-between">
-        {/* Brand Lockup */}
-        <div className="flex items-center gap-2.5">
-          <img
-            src="/logo.png"
-            alt="ازبطها"
-            className="h-8 sm:h-9 w-auto max-h-9 object-contain rounded-xl shadow-xs select-none"
-          />
-        </div>
-
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {!isToday && (
+          {!isCurrent && jumpHandler && (
             <button
               onClick={() => {
                 sound.playTap();
-                onJumpToToday();
+                jumpHandler();
               }}
               className="text-xs font-semibold px-3 py-1.5 rounded-full bg-[#243B35] text-[#F6F3EE] hover:bg-[#1b2d28] transition-colors flex items-center gap-1.5 shadow-xs active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-[#D8C3A5]" />
-              <span className="hidden sm:inline">ارجع للنهارده</span>
-              <span className="sm:hidden">اليوم</span>
+              {periodType === 'month' ? (
+                <>
+                  <span className="hidden sm:inline">ارجع للشهر ده</span>
+                  <span className="sm:hidden">الشهر ده</span>
+                </>
+              ) : periodType === 'week' ? (
+                <>
+                  <span className="hidden sm:inline">ارجع للأسبوع ده</span>
+                  <span className="sm:hidden">الأسبوع ده</span>
+                </>
+              ) : (
+                <>
+                  <span className="hidden sm:inline">ارجع للنهارده</span>
+                  <span className="sm:hidden">اليوم</span>
+                </>
+              )}
             </button>
           )}
 

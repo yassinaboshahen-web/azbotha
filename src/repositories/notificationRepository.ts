@@ -79,4 +79,18 @@ export const notificationRepository = {
       }
     }
   },
+  /**
+   * Delete a notification by ID.
+   */
+  async deleteNotification(id: string): Promise<void> {
+    const db = await getDB();
+    if (db) {
+      try {
+        await db.delete('notifications', id);
+      } catch (err) {
+        console.warn('notificationRepository.deleteNotification DB error:', err);
+      }
+    }
+    getInMemoryStore('notifications').delete(id);
+  },
 };

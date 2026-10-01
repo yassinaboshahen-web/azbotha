@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CalendarEvent, TaskItem } from '../types';
-import { formatArabicFullDate } from '../utils/dateUtils';
+import { formatArabicFullDate, getTodayDateString } from '../utils/dateUtils';
 import { evaluateSmartDayContext } from '../utils/smartContextEngine';
-import { ChevronRight, ChevronLeft, Sparkles, Clock } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Sparkles, Clock, Calendar as CalendarIcon, Share2 } from 'lucide-react';
 import { sound } from '../utils/audio';
+import { DateJumpSheet } from './DateJumpSheet';
 
 interface HeroGreetingProps {
   currentDateStr: string;
   onPrevDay: () => void;
   onNextDay: () => void;
+  onSelectDate?: (dateStr: string) => void;
+  onJumpToToday?: () => void;
+  onOpenExport?: () => void;
   events: CalendarEvent[];
   tasks: TaskItem[];
   tomorrowEvents?: CalendarEvent[];
@@ -20,13 +24,19 @@ export const HeroGreeting: React.FC<HeroGreetingProps> = ({
   currentDateStr,
   onPrevDay,
   onNextDay,
+  onSelectDate,
+  onJumpToToday,
+  onOpenExport,
   events,
   tasks,
   tomorrowEvents = [],
   tomorrowTasks = [],
   onSelectNextEvent,
 }) => {
+  const [isJumpOpen, setIsJumpOpen] = useState(false);
   const { formattedDate, isToday, isTomorrow, isYesterday } = formatArabicFullDate(currentDateStr);
+  const todayStr = getTodayDateString();
+  const isPast = currentDateStr < todayStr;
 
   const smartContext = evaluateSmartDayContext({
     dateStr: currentDateStr,
@@ -40,12 +50,12 @@ export const HeroGreeting: React.FC<HeroGreetingProps> = ({
     <section className="pt-5 pb-3 px-4 sm:px-6 max-w-3xl mx-auto transition-all">
       {/* Friendly Greeting Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#243B35]">
             {smartContext.greeting}
           </h1>
           {smartContext.badge && (
-            <span className="text-xs font-semibold text-[#77766F] select-none">
+            <span className="text-xs font-semibold text-[#77766F] select-none whitespace-nowrap">
               · {smartContext.badge}
             </span>
           )}
@@ -82,40 +92,93 @@ export const HeroGreeting: React.FC<HeroGreetingProps> = ({
       </div>
 
       {/* Dynamic Date Header */}
-      <div className="flex items-baseline gap-2 mb-2">
-        <h2 className="text-lg sm:text-xl font-bold text-[#243B35]">
-          {formattedDate}
-        </h2>
+      <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+        <button
+          onClick={() => {
+            sound.playTap();
+            setIsJumpOpen(true);
+          }}
+          className="text-lg sm:text-xl font-bold text-[#243B35] hover:text-[#C58B5C] transition-colors flex items-center gap-2 group cursor-pointer text-right"
+          title="انقر لتغيير التاريخ أو القفز ليوم محدد"
+        >
+          <span>{formattedDate}</span>
+          <CalendarIcon className="w-4 h-4 text-[#C58B5C] opacity-75 group-hover:opacity-100 transition-opacity" />
+        </button>
+
+        {isPast && (
+          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#E4DED4]/80 text-[#77766F] inline-flex items-center gap-1 select-none">
+            <span>🕰️</span>
+            <span>من الماضي</span>
+          </span>
+        )}
+
+        {!isToday && onJumpToToday && (
+          <button
+            onClick={() => {
+              sound.playTap();
+              onJumpToToday();
+            }}
+            className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#243B35] text-[#F6F3EE] hover:bg-[#1b2d28] transition-colors inline-flex items-center gap-1 cursor-pointer"
+          >
+            <span>رجوع للنهارده</span>
+          </button>
+        )}
+
+        {onOpenExport && (
+          <button
+            onClick={() => {
+              sound.playTap();
+              onOpenExport();
+            }}
+            className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#F6F3EE] text-[#243B35] border border-[#E4DED4] hover:bg-[#E4DED4] transition-colors inline-flex items-center gap-1 cursor-pointer ms-auto"
+            title="تصدير ومشاركة جدول اليوم"
+          >
+            <Share2 className="w-3.5 h-3.5 text-[#C58B5C]" />
+            <span>مشاركة الجدول</span>
+          </button>
+        )}
       </div>
 
-      {/* Dynamic Context Headline & Subtext Card */}
-      <div className="bg-white/80 border border-[#E4DED4] rounded-2xl p-4 shadow-xs transition-all">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-sm sm:text-base font-bold text-[#243B35] flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#C58B5C] shrink-0" />
-              <span>{smartContext.headline}</span>
-            </p>
-            <p className="text-xs sm:text-sm text-[#77766F] leading-relaxed pr-6">
-              {smartContext.subtext}
-            </p>
+      {onSelectDate && (
+        <DateJumpSheet
+          isOpen={isJumpOpen}
+          onClose={() => setIsJumpOpen(false)}
+          mode="day"
+          currentDateStr={currentDateStr}
+          onSelectDate={onSelectDate}
+        />
+      )}
+
+      {/* Dynamic Context Headline & Subtext Card - Only shown when day has items to avoid duplicate empty card */}
+      {(events.length > 0 || tasks.length > 0) && (
+        <div className="bg-white/80 border border-[#E4DED4] rounded-2xl p-4 shadow-xs transition-all">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-sm sm:text-base font-bold text-[#243B35] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#C58B5C] shrink-0" />
+                <span>{smartContext.headline}</span>
+              </p>
+              <p className="text-xs sm:text-sm text-[#77766F] leading-relaxed pr-6">
+                {smartContext.subtext}
+              </p>
+            </div>
+
+            {smartContext.nextEvent && onSelectNextEvent && (
+              <button
+                onClick={() => {
+                  sound.playTap();
+                  if (smartContext.nextEvent) onSelectNextEvent(smartContext.nextEvent);
+                }}
+                className="shrink-0 text-xs font-bold text-[#C58B5C] bg-[#FBF0E4] hover:bg-[#f6e4d2] px-3 py-1.5 rounded-xl border border-[#E8CEB5] transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تفاصيل اللي جاي</span>
+                <span className="sm:hidden">التفاصيل</span>
+              </button>
+            )}
           </div>
-
-          {smartContext.nextEvent && onSelectNextEvent && (
-            <button
-              onClick={() => {
-                sound.playTap();
-                if (smartContext.nextEvent) onSelectNextEvent(smartContext.nextEvent);
-              }}
-              className="shrink-0 text-xs font-bold text-[#C58B5C] bg-[#FBF0E4] hover:bg-[#f6e4d2] px-3 py-1.5 rounded-xl border border-[#E8CEB5] transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">تفاصيل اللي جاي</span>
-              <span className="sm:hidden">التفاصيل</span>
-            </button>
-          )}
         </div>
-      </div>
+      )}
     </section>
   );
 };

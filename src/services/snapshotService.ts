@@ -167,6 +167,9 @@ export const snapshotService = {
     const { syncService } = await import('./syncService');
     syncService.flushSyncQueue().catch(() => {});
 
+    const { ReminderEngine } = await import('./ReminderEngine');
+    ReminderEngine.checkAndFireReminders().catch(() => {});
+
     return true;
   },
 

@@ -1,6 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CalendarEvent } from '../types';
-import { formatTime12h, getEventStatus, timeStringToMinutes, getCurrentTimeMinutes } from '../utils/dateUtils';
+import {
+  formatTime12h,
+  getEventStatus,
+  timeStringToMinutes,
+  getCurrentTimeMinutes,
+  checkEventsTimeOverlap,
+} from '../utils/dateUtils';
 import { Check, Clock, MapPin, User, ChevronLeft } from 'lucide-react';
 import { sound } from '../utils/audio';
 import { EmptyState } from './EmptyState';
@@ -35,6 +41,22 @@ export const TimeFlow: React.FC<TimeFlowProps> = ({
   const sortedEvents = [...events].sort(
     (a, b) => timeStringToMinutes(a.time) - timeStringToMinutes(b.time)
   );
+
+  // Identify events that conflict/overlap in time with another event on the same day
+  const conflictingEventIds = useMemo(() => {
+    const conflictIds = new Set<string>();
+    for (let i = 0; i < sortedEvents.length; i++) {
+      if (sortedEvents[i].completed) continue;
+      for (let j = i + 1; j < sortedEvents.length; j++) {
+        if (sortedEvents[j].completed) continue;
+        if (checkEventsTimeOverlap(sortedEvents[i], sortedEvents[j])) {
+          conflictIds.add(sortedEvents[i].id);
+          conflictIds.add(sortedEvents[j].id);
+        }
+      }
+    }
+    return conflictIds;
+  }, [sortedEvents]);
 
   const formatCurrentBrowserTime = () => {
     const now = new Date();
@@ -191,6 +213,14 @@ export const TimeFlow: React.FC<TimeFlowProps> = ({
                           <span aria-hidden="true" className="text-[#CEC4B5]">·</span>
                           <span className="text-[#A3A198] text-[11px]">
                             (الميعاد عدى)
+                          </span>
+                        </>
+                      )}
+                      {conflictingEventIds.has(event.id) && !event.completed && (
+                        <>
+                          <span aria-hidden="true" className="text-[#CEC4B5]">·</span>
+                          <span className="text-amber-800 bg-amber-100/90 border border-amber-300 text-[11px] font-bold px-1.5 py-0.5 rounded-md inline-flex items-center gap-1">
+                            ⚠ تعارض
                           </span>
                         </>
                       )}

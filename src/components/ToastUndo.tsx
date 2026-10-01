@@ -20,7 +20,7 @@ export const ToastUndo: React.FC<ToastUndoProps> = ({ toasts, onDismiss }) => {
 
   return (
     <div
-      className="fixed bottom-20 sm:bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[calc(100%-2rem)] max-w-md pointer-events-none"
+      className="fixed bottom-24 sm:bottom-24 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 w-[calc(100%-2rem)] max-w-md pointer-events-none"
       role="region"
       aria-label="الإشعارات والتأكيدات"
     >

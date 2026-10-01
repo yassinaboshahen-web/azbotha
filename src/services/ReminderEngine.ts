@@ -1,7 +1,9 @@
 import { CalendarEvent, TaskItem, QuickThought, NotificationItem } from '../types';
 import { indexedDBRepository } from '../repositories/indexedDBRepository';
 import { sound } from '../utils/audio';
+import { combineDateAndTime, parseCalendarDate, formatCalendarDate } from '../utils/dateUtils';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { Capacitor } from '@capacitor/core';
 
 export interface ReminderTrigger {
   id: string; // Unique trigger ID: `${entityId}_${triggerKey}`
@@ -13,16 +15,68 @@ export interface ReminderTrigger {
   notificationType: 'upcoming' | 'task' | 'tomorrow' | 'reminder' | 'morning' | 'evening' | 'general';
 }
 
-export const REMINDER_CHANNEL_ID = 'azbatha_reminders_audible_v1';
+export interface ScheduledTriggerRecord {
+  id: string;
+  triggerTime: number;
+  title?: string;
+  body?: string;
+  notificationId?: number;
+}
+
+export const REMINDER_CHANNEL_ID = 'azbatha_reminders_audible_v2';
+export const REMINDER_SOUND = 'azbotha_notification.ogg';
+
+// 45 days forward horizon for events/tasks, 14 days for daily summary
+export const REMINDER_HORIZON_DAYS = 45;
+export const DAILY_SUMMARY_HORIZON_DAYS = 14;
+export const MAX_SCHEDULED_NOTIFICATIONS = 400; // Safe threshold well under Android's ~500 limit
 
 const FIRED_REMINDERS_KEY = 'fired_reminders_set';
 
-function hashStringToInt(str: string): number {
-  let hash = 0;
+/**
+ * Deterministic 31-bit FNV-1a based integer hash ensuring a safe non-negative integer (0 to 2147483647).
+ * Avoids Java/Kotlin Integer overflow edge cases on Android AlarmManager / NotificationManager.
+ */
+export function hashStringToInt(str: string): number {
+  let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return Math.abs(hash | 0);
+  return (hash & 0x7fffffff);
+}
+
+/**
+ * Assigns collision-free, deterministic 31-bit integer notification IDs to an array of triggers.
+ * If two distinct triggers produce the same base hash, increments deterministically until unique.
+ */
+export function assignUniqueNotificationIds<T extends { id: string }>(items: T[]): Map<string, number> {
+  const assigned = new Map<string, number>();
+  const usedIntIds = new Set<number>();
+
+  for (const item of items) {
+    let intId = hashStringToInt(item.id);
+    // If collision occurs within this batch, resolve by linear probing within 31-bit integer range
+    while (usedIntIds.has(intId)) {
+      intId = (intId + 1) & 0x7fffffff;
+    }
+    usedIntIds.add(intId);
+    assigned.set(item.id, intId);
+  }
+
+  return assigned;
+}
+
+/**
+ * Cleanly formats optional event details into Arabic without empty labels.
+ */
+function formatEventMetadata(evt: CalendarEvent): string {
+  const parts: string[] = [];
+  if (evt.course) parts.push(`مادة: ${evt.course}`);
+  const instructor = evt.doctor_or_ta || evt.instructor;
+  if (instructor) parts.push(`مع: ${instructor}`);
+  if (evt.location) parts.push(`المكان: ${evt.location}`);
+  return parts.join(' • ');
 }
 
 class ReminderEngineClass {
@@ -33,8 +87,8 @@ class ReminderEngineClass {
   private channelConfigured = false;
 
   /**
-   * Configures the Android Notification Channel with IMPORTANCE_HIGH (4) and sound/vibration
-   * so local scheduled notifications produce normal audible notifications in the Android notification shade.
+   * Configures the Android Notification Channel with IMPORTANCE_HIGH (4), custom sound, and vibration
+   * so local scheduled notifications produce audible notifications with custom azbotha_notification.ogg.
    */
   async ensureNotificationChannel(): Promise<void> {
     if (this.channelConfigured) return;
@@ -51,7 +105,7 @@ class ReminderEngineClass {
         return;
       }
 
-      // If it exists but was configured with low/silent importance (< 4), delete it first to allow upgrade
+      // If existing channel had low importance, delete it to recreate
       if (existing) {
         try {
           await LocalNotifications.deleteChannel({ id: REMINDER_CHANNEL_ID });
@@ -60,8 +114,8 @@ class ReminderEngineClass {
         }
       }
 
-      // Clean up legacy channels if present
-      for (const oldId of ['reminders_channel', 'reminders_audible_channel']) {
+      // Clean up legacy v1 and older channels if present
+      for (const oldId of ['reminders_channel', 'reminders_audible_channel', 'azbatha_reminders_audible_v1']) {
         if (channels.some((c) => c.id === oldId)) {
           try {
             await LocalNotifications.deleteChannel({ id: oldId });
@@ -71,13 +125,14 @@ class ReminderEngineClass {
         }
       }
 
-      // Create channel with High Importance (4) - plays device's default notification sound and shows in shade
+      // Create new channel with High Importance (4) and custom azbotha_notification.ogg sound
       await LocalNotifications.createChannel({
         id: REMINDER_CHANNEL_ID,
         name: 'تنبيهات ومواعيد ازبطها',
-        description: 'إشعارات صوتية للتذكير بمواعيدك ومهامك اليومية',
+        description: 'إشعارات صوتية مخصصة للتذكير بمواعيدك ومهامك اليومية',
         importance: 4, // IMPORTANCE_HIGH: plays sound and displays notification in shade & heads-up
         visibility: 1, // VISIBILITY_PUBLIC: shows on lockscreen
+        sound: REMINDER_SOUND,
         vibration: true,
         lights: true,
         lightColor: '#243B35',
@@ -109,7 +164,6 @@ class ReminderEngineClass {
 
   private async saveFiredSet(): Promise<void> {
     try {
-      // Keep set size reasonable (limit to last 500 triggers)
       const list = Array.from(this.firedTriggerIds).slice(-500);
       await indexedDBRepository.setMetadata(FIRED_REMINDERS_KEY, list);
     } catch {
@@ -118,24 +172,69 @@ class ReminderEngineClass {
   }
 
   /**
-   * User-initiated request for browser/Native Notification permission.
-   * NEVER called automatically on page load.
+   * Checks Android 12+ Exact Notification / Alarm setting status.
+   */
+  async checkExactNotificationSetting(): Promise<boolean> {
+    try {
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        const res = await LocalNotifications.checkExactNotificationSetting();
+        return res.exact_alarm === 'granted';
+      }
+    } catch (e) {
+      console.warn('Exact alarm check not supported or failed:', e);
+    }
+    return true;
+  }
+
+  /**
+   * Opens Android OS settings screen to allow SCHEDULE_EXACT_ALARM.
+   */
+  async changeExactNotificationSetting(): Promise<void> {
+    try {
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        await LocalNotifications.changeExactNotificationSetting();
+      }
+    } catch (e) {
+      console.warn('Change exact notification setting failed:', e);
+    }
+  }
+
+  /**
+   * Returns exact alarm permission status ('granted', 'denied', or 'unsupported').
+   */
+  async getExactAlarmStatus(): Promise<'granted' | 'denied' | 'unsupported'> {
+    try {
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        const res = await LocalNotifications.checkExactNotificationSetting();
+        return res.exact_alarm === 'granted' ? 'granted' : 'denied';
+      }
+    } catch {
+      // Not on Android 12+ or unsupported
+    }
+    return 'unsupported';
+  }
+
+  /**
+   * User-initiated request for native/browser Notification permission.
    */
   async requestNotificationPermission(): Promise<boolean> {
     try {
-      // Try native Capacitor permission first
+      // Native Capacitor permission check & request
       const permResult = await LocalNotifications.requestPermissions();
-      
+
       // Android 12+ check for Exact Alarms
-      if (typeof window !== 'undefined' && 'navigator' in window && (navigator as any).userAgent.includes('Android')) {
-        const canSchedule = await LocalNotifications.checkExactNotificationSetting();
-        if (canSchedule.exact_alarm !== 'granted') {
-            await LocalNotifications.changeExactNotificationSetting();
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        try {
+          const canSchedule = await LocalNotifications.checkExactNotificationSetting();
+          if (canSchedule.exact_alarm !== 'granted') {
+            await LocalNotifications.changeExactNotificationSetting().catch(() => {});
+          }
+        } catch {
+          // ignore exact alarm check errors if not supported
         }
       }
 
       if (permResult.display === 'granted') {
-        // Ensure audible channel is created immediately upon permission grant
         await this.ensureNotificationChannel();
         // Clear local cache to force full re-sync to OS on permission grant
         await indexedDBRepository.setMetadata('native_scheduled_triggers', null);
@@ -155,18 +254,66 @@ class ReminderEngineClass {
     if (Notification.permission !== 'denied') {
       const perm = await Notification.requestPermission();
       if (perm === 'granted') {
-          this.checkAndFireReminders().catch(() => {});
-          return true;
+        this.checkAndFireReminders().catch(() => {});
+        return true;
       }
     }
     return false;
   }
 
-  getNotificationPermissionStatus(): NotificationPermission | 'unsupported' {
+  /**
+   * Asynchronously checks native Android or Web notification permission status.
+   */
+  async getNotificationPermissionStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
+    try {
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        const { display } = await LocalNotifications.checkPermissions();
+        if (display === 'granted') return 'granted';
+        if (display === 'denied') return 'denied';
+        if (display === 'prompt' || display === 'prompt-with-rationale') return 'prompt';
+      }
+    } catch {
+      // fallback to browser
+    }
+
     if (typeof window === 'undefined' || !('Notification' in window)) {
       return 'unsupported';
     }
-    return Notification.permission;
+    if (Notification.permission === 'granted') return 'granted';
+    if (Notification.permission === 'denied') return 'denied';
+    return 'prompt';
+  }
+
+  /**
+   * Schedules a test notification to fire in `delaySeconds` (default 10 seconds).
+   * Verifies audio channel, sound playback, and notification delivery.
+   */
+  async scheduleTestNotification(delaySeconds = 10): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.ensureNotificationChannel();
+      const testDate = new Date(Date.now() + delaySeconds * 1000);
+      const testId = hashStringToInt(`test_notif_${Date.now()}`);
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: testId,
+            title: 'تجربة تنبيه ازبطها 🔔',
+            body: 'الصوت والإشعار شغالين تمام! كل مواعيدك ومهامك في أمان 🚀',
+            channelId: REMINDER_CHANNEL_ID,
+            sound: REMINDER_SOUND,
+            schedule: { at: testDate, allowWhileIdle: true },
+            extra: { type: 'test' },
+          },
+        ],
+      });
+
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('Test notification schedule error:', msg);
+      return { success: false, error: msg };
+    }
   }
 
   /**
@@ -196,7 +343,8 @@ class ReminderEngineClass {
   }
 
   /**
-   * Main reminder evaluation method. Checks events, tasks, and quick thoughts against current time.
+   * Main reminder evaluation and synchronization method.
+   * Compares active planner data, cancels stale/ghost notifications, and schedules valid future triggers.
    */
   async checkAndFireReminders(): Promise<void> {
     await this.initialize();
@@ -217,7 +365,6 @@ class ReminderEngineClass {
       if (evt.completed || evt.status === 'completed' || evt.status === 'cancelled') {
         continue;
       }
-      // Respect reminder: false
       if (evt.reminder === false) continue;
 
       const evtTriggers = this.calculateEventTriggers(evt, userTimezone);
@@ -229,7 +376,6 @@ class ReminderEngineClass {
       if (task.completed || task.status === 'completed') {
         continue;
       }
-      // Respect reminder: false (default to true)
       if (task.reminder === false) continue;
 
       const taskTriggers = this.calculateTaskTriggers(task, userTimezone);
@@ -245,82 +391,113 @@ class ReminderEngineClass {
       triggers.push(...thTriggers);
     }
 
-    // --- Optimized Native Scheduling Logic ---
-    const horizonMs = nowMs + 14 * 24 * 60 * 60 * 1000;
+    // --- Native Android AlarmManager Scheduling & Cancellation ---
+    // 45 days forward horizon, prioritizing earliest triggers, capped at MAX_SCHEDULED_NOTIFICATIONS (400)
+    const horizonMs = nowMs + REMINDER_HORIZON_DAYS * 24 * 60 * 60 * 1000;
     const futureTriggers = triggers
-      .filter(t => t.triggerTime > nowMs && t.triggerTime < horizonMs)
+      .filter((t) => t.triggerTime > nowMs && t.triggerTime <= horizonMs)
       .sort((a, b) => a.triggerTime - b.triggerTime)
-      .slice(0, 60);
+      .slice(0, MAX_SCHEDULED_NOTIFICATIONS);
 
-    // Fetch previously scheduled triggers to compare
-    const prevScheduled = await indexedDBRepository.getMetadata<{id: string, triggerTime: number}[]>('native_scheduled_triggers') || [];
+    // Compute unique notification IDs for all future triggers
+    const triggerIdMap = assignUniqueNotificationIds(futureTriggers);
 
-    const triggersToSchedule = futureTriggers.filter(t => {
-        const prev = prevScheduled.find(p => p.id === t.id);
-        return !prev || prev.triggerTime !== t.triggerTime;
+    // Fetch previously scheduled triggers
+    const prevScheduled = (await indexedDBRepository.getMetadata<ScheduledTriggerRecord[]>('native_scheduled_triggers')) || [];
+
+    // Triggers that need to be scheduled (new or modified trigger time, title, or body)
+    const triggersToSchedule = futureTriggers.filter((t) => {
+      const prev = prevScheduled.find((p) => p.id === t.id);
+      return !prev || prev.triggerTime !== t.triggerTime || prev.title !== t.title || prev.body !== t.body;
     });
 
-    const triggersToCancel = prevScheduled.filter(p => !futureTriggers.find(f => f.id === p.id));
+    // Triggers that need to be cancelled:
+    // Any previously scheduled trigger that is no longer in futureTriggers OR whose trigger time, title, or body has changed
+    const triggersToCancel = prevScheduled.filter((p) => {
+      const current = futureTriggers.find((f) => f.id === p.id);
+      return !current || current.triggerTime !== p.triggerTime || current.title !== p.title || current.body !== p.body;
+    });
 
+    const isNative = typeof window !== 'undefined' && Capacitor.isNativePlatform();
     let allSuccessful = true;
 
+    // Cancel stale / modified triggers from Android AlarmManager
     if (triggersToCancel.length > 0) {
-        try {
-            await LocalNotifications.cancel({
-                notifications: triggersToCancel.map(t => ({ id: hashStringToInt(t.id) })),
-            });
-        } catch {
-            allSuccessful = false;
+      try {
+        await LocalNotifications.cancel({
+          notifications: triggersToCancel.map((t) => ({ id: t.notificationId ?? hashStringToInt(t.id) })),
+        });
+      } catch (err) {
+        console.warn('Native notification cancellation error:', err);
+        if (isNative) {
+          allSuccessful = false;
         }
+      }
     }
 
+    // Schedule new / modified triggers to Android AlarmManager
     if (triggersToSchedule.length > 0) {
-        try {
-            await this.ensureNotificationChannel();
-            await LocalNotifications.schedule({
-                notifications: triggersToSchedule.map(t => ({
-                    id: hashStringToInt(t.id),
-                    title: t.title,
-                    body: t.body,
-                    channelId: REMINDER_CHANNEL_ID,
-                    schedule: { at: new Date(t.triggerTime), allowWhileIdle: true },
-                    extra: { entityId: t.entityId, entityType: t.entityType },
-                })),
-            });
-        } catch (e) {
-            console.error('Schedule error:', e);
-            allSuccessful = false;
+      try {
+        await this.ensureNotificationChannel();
+        await LocalNotifications.schedule({
+          notifications: triggersToSchedule.map((t) => {
+            const intId = triggerIdMap.get(t.id) ?? hashStringToInt(t.id);
+            return {
+              id: intId,
+              title: t.title,
+              body: t.body,
+              channelId: REMINDER_CHANNEL_ID,
+              sound: REMINDER_SOUND,
+              schedule: { at: new Date(t.triggerTime), allowWhileIdle: true },
+              extra: { entityId: t.entityId, entityType: t.entityType },
+            };
+          }),
+        });
+      } catch (e) {
+        console.error('Native notification schedule error:', e);
+        if (isNative) {
+          allSuccessful = false;
         }
+      }
     }
 
-    // Persist new set ONLY if all scheduling operations succeeded
-    if (allSuccessful) {
-        await indexedDBRepository.setMetadata('native_scheduled_triggers', futureTriggers.map(t => ({id: t.id, triggerTime: t.triggerTime})));
+    // Persist new active set when operations succeed (or in web environment)
+    if (allSuccessful || !isNative) {
+      await indexedDBRepository.setMetadata(
+        'native_scheduled_triggers',
+        futureTriggers.map((t) => ({
+          id: t.id,
+          triggerTime: t.triggerTime,
+          title: t.title,
+          body: t.body,
+          notificationId: triggerIdMap.get(t.id) ?? hashStringToInt(t.id),
+        }))
+      );
     }
 
-    // Process all pending triggers (local web fallback/catchup evaluation)
+    // Process all pending triggers for in-app / web fallback
     let newTriggersFired = false;
 
     for (const trigger of triggers) {
       if (this.firedTriggerIds.has(trigger.id)) {
-        continue; // Skip already fired
+        continue;
       }
 
       const diffMs = nowMs - trigger.triggerTime;
 
-      // Case A: Trigger time reached or due now (within 0 - 3 minutes)
+      // Case A: Due now (within 0 - 3 minutes)
       if (diffMs >= 0 && diffMs <= 3 * 60 * 1000) {
         await this.fireTrigger(trigger);
         this.firedTriggerIds.add(trigger.id);
         newTriggersFired = true;
       }
-      // Case B: Missed reminder (occurred between 3 mins and 12 hours ago)
+      // Case B: Missed reminder (within 3 mins - 12 hours)
       else if (diffMs > 3 * 60 * 1000 && diffMs <= 12 * 60 * 60 * 1000) {
         await this.fireTrigger(trigger, true /* isCatchup */);
         this.firedTriggerIds.add(trigger.id);
         newTriggersFired = true;
       }
-      // Case C: Expired (older than 12 hours) -> mark as fired to prevent spamming
+      // Case C: Older than 12 hours -> mark fired
       else if (diffMs > 12 * 60 * 60 * 1000) {
         this.firedTriggerIds.add(trigger.id);
         newTriggersFired = true;
@@ -331,129 +508,187 @@ class ReminderEngineClass {
       await this.saveFiredSet();
     }
 
-    // Schedule the Daily 5 PM summary notification natively via Capacitor
-    await this.scheduleDailySummary(events, tasks, userTimezone);
+    // Schedule rolling 14-day 5 PM tomorrow summary notifications
+    await this.scheduleRollingDailySummaries(events, tasks);
   }
 
   /**
-   * Schedules a daily 5 PM summary notification for tomorrow's events and tasks.
-   * Runs natively via Capacitor LocalNotifications.
+   * Maintains a rolling 14-day schedule of 5:00 PM tomorrow-summary notifications.
+   * Runs natively via Capacitor LocalNotifications so notifications fire even if app is closed.
    */
-  async scheduleDailySummary(events: CalendarEvent[], tasks: TaskItem[], userTimezone: string): Promise<void> {
+  async scheduleRollingDailySummaries(events: CalendarEvent[], tasks: TaskItem[]): Promise<void> {
     try {
-      const DAILY_SUMMARY_NOTIFICATION_ID = 500500;
-
-      // Calculate next 5:00 PM local time
       const now = new Date();
-      const target = new Date();
-      target.setHours(17, 0, 0, 0);
+      const desiredSummaries: Array<{
+        id: number;
+        title: string;
+        body: string;
+        triggerDate: Date;
+        targetTomorrowStr: string;
+      }> = [];
 
-      if (target.getTime() <= now.getTime()) {
-        target.setDate(target.getDate() + 1);
-      }
+      // Check upcoming 14 days for 5 PM notifications
+      for (let dayOffset = 0; dayOffset < DAILY_SUMMARY_HORIZON_DAYS; dayOffset++) {
+        const triggerDate = new Date();
+        triggerDate.setDate(now.getDate() + dayOffset);
+        triggerDate.setHours(17, 0, 0, 0); // 5:00 PM local time
 
-      // "Tomorrow" relative to target trigger time
-      const summaryDay = new Date(target);
-      summaryDay.setDate(summaryDay.getDate() + 1);
-      
-      const year = summaryDay.getFullYear();
-      const month = String(summaryDay.getMonth() + 1).padStart(2, '0');
-      const day = String(summaryDay.getDate()).padStart(2, '0');
-      const tomorrowDateStr = `${year}-${month}-${day}`;
-
-      // Filter events
-      const tomorrowEvents = events.filter(evt => {
-        if (evt.completed || evt.status === 'completed' || evt.status === 'cancelled') {
-          return false;
+        // Skip if 5:00 PM for today has already passed
+        if (triggerDate.getTime() <= now.getTime()) {
+          continue;
         }
-        const dateStr = evt.date || evt.start_time;
-        return dateStr === tomorrowDateStr;
-      });
 
-      // Filter tasks
-      const tomorrowTasks = tasks.filter(task => {
-        if (task.completed || task.status === 'completed') {
-          return false;
-        }
-        const dueStr = task.due_date || task.date;
-        return dueStr === tomorrowDateStr;
-      });
+        // The day being summarized is "tomorrow" relative to the 5 PM triggerDate
+        const tomorrowDate = new Date(triggerDate);
+        tomorrowDate.setDate(tomorrowDate.getDate() + 1);
 
-      // Cancel any existing summary notification first to prevent duplicates
-      try {
-        await LocalNotifications.cancel({
-          notifications: [{ id: DAILY_SUMMARY_NOTIFICATION_ID }]
-        });
-      } catch {
-        // ignore
-      }
+        const year = tomorrowDate.getFullYear();
+        const month = String(tomorrowDate.getMonth() + 1).padStart(2, '0');
+        const day = String(tomorrowDate.getDate()).padStart(2, '0');
+        const targetTomorrowStr = `${year}-${month}-${day}`;
 
-      const items: string[] = [];
-
-      // Add events
-      for (const evt of tomorrowEvents) {
-        const timeStr = evt.time || evt.start_time;
-        if (timeStr && timeStr.includes(':')) {
-          items.push(`${evt.title} الساعة ${timeStr}`);
-        } else {
-          items.push(evt.title);
-        }
-      }
-
-      // Add tasks
-      for (const task of tomorrowTasks) {
-        const timeStr = task.due_time;
-        if (timeStr && timeStr.includes(':')) {
-          items.push(`${task.title} الساعة ${timeStr}`);
-        } else {
-          items.push(task.title);
-        }
-      }
-
-      if (items.length === 0) {
-        return; // No items scheduled for tomorrow -> do not send
-      }
-
-      const count = items.length;
-      let countWord = '';
-      if (count === 1) countWord = 'حاجة واحدة';
-      else if (count === 2) countWord = 'حاجتين';
-      else if (count >= 3 && count <= 10) countWord = `${count} حاجات`;
-      else countWord = `${count} حاجة`;
-
-      let bodyText = `بكرا عندك ${countWord}: `;
-      if (count === 1) {
-        bodyText += items[0] + '.';
-      } else {
-        const initial = items.slice(0, -1).join('، ');
-        const last = items[items.length - 1];
-        bodyText += `${initial}، و${last}.`;
-      }
-
-      await this.ensureNotificationChannel();
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: DAILY_SUMMARY_NOTIFICATION_ID,
-            title: "وراك بكرا 👀",
-            body: bodyText,
-            channelId: REMINDER_CHANNEL_ID,
-            schedule: { at: target },
-            extra: { type: 'tomorrow_summary' },
+        // Find active uncompleted events for tomorrow
+        const tomorrowEvents = events.filter((evt) => {
+          if (evt.completed || evt.status === 'completed' || evt.status === 'cancelled') {
+            return false;
           }
-        ]
-      });
-    } catch {
-      // Ignore if not in Capacitor environment
+          const dStr = evt.date || evt.start_time;
+          return dStr === targetTomorrowStr;
+        });
+
+        // Find active uncompleted tasks for tomorrow
+        const tomorrowTasks = tasks.filter((task) => {
+          if (task.completed || task.status === 'completed') {
+            return false;
+          }
+          const dStr = task.due_date || task.date;
+          return dStr === targetTomorrowStr;
+        });
+
+        const items: string[] = [];
+
+        // Events list
+        for (const evt of tomorrowEvents) {
+          const timeStr = evt.time || evt.start_time;
+          const coursePart = evt.course ? ` (${evt.course})` : '';
+          if (timeStr && timeStr.includes(':')) {
+            items.push(`${evt.title}${coursePart} الساعة ${timeStr}`);
+          } else {
+            items.push(`${evt.title}${coursePart}`);
+          }
+        }
+
+        // Tasks list
+        for (const task of tomorrowTasks) {
+          if (task.due_time && task.due_time.includes(':')) {
+            items.push(`${task.title} الساعة ${task.due_time}`);
+          } else {
+            items.push(task.title);
+          }
+        }
+
+        // If nothing scheduled for tomorrow, do not schedule an empty summary
+        if (items.length === 0) {
+          continue;
+        }
+
+        const count = items.length;
+        let countWord = '';
+        if (count === 1) countWord = 'حاجة واحدة';
+        else if (count === 2) countWord = 'حاجتين';
+        else if (count >= 3 && count <= 10) countWord = `${count} حاجات`;
+        else countWord = `${count} حاجة`;
+
+        let bodyText = `بكرة عندك ${countWord}: `;
+        if (count === 1) {
+          bodyText += items[0] + '.';
+        } else {
+          const initial = items.slice(0, -1).join('، ');
+          const last = items[items.length - 1];
+          bodyText += `${initial}، و${last}.`;
+        }
+
+        const notifId = hashStringToInt(`azbotha_summary_5pm_${targetTomorrowStr}`);
+
+        desiredSummaries.push({
+          id: notifId,
+          title: 'وراك بكرة 👀',
+          body: bodyText,
+          triggerDate,
+          targetTomorrowStr,
+        });
+      }
+
+      // Fetch previously scheduled summary notification IDs
+      const prevSummaryIds = (await indexedDBRepository.getMetadata<number[]>('scheduled_daily_summary_ids')) || [];
+
+      // Cancel summaries no longer in desired set
+      const toCancel = prevSummaryIds.filter((id) => !desiredSummaries.some((d) => d.id === id));
+      if (toCancel.length > 0) {
+        try {
+          await LocalNotifications.cancel({
+            notifications: toCancel.map((id) => ({ id })),
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      // Schedule or refresh current desired summaries
+      if (desiredSummaries.length > 0) {
+        await this.ensureNotificationChannel();
+        await LocalNotifications.schedule({
+          notifications: desiredSummaries.map((s) => ({
+            id: s.id,
+            title: s.title,
+            body: s.body,
+            channelId: REMINDER_CHANNEL_ID,
+            sound: REMINDER_SOUND,
+            schedule: { at: s.triggerDate, allowWhileIdle: true },
+            extra: { type: 'daily_summary_5pm', targetDate: s.targetTomorrowStr },
+          })),
+        });
+      }
+
+      // Save scheduled summary IDs
+      await indexedDBRepository.setMetadata(
+        'scheduled_daily_summary_ids',
+        desiredSummaries.map((d) => d.id)
+      );
+    } catch (err) {
+      console.warn('Rolling daily summary schedule error:', err);
     }
   }
 
   /**
-   * Calculates reminder triggers for a CalendarEvent.
+   * Explicitly cancels any scheduled native notification associated with a specific entityId immediately.
+   */
+  async cancelEntityReminders(entityId: string): Promise<void> {
+    try {
+      const prevScheduled = (await indexedDBRepository.getMetadata<ScheduledTriggerRecord[]>('native_scheduled_triggers')) || [];
+      const matching = prevScheduled.filter((p) => p.id.startsWith(`${entityId}_`));
+      if (matching.length > 0) {
+        try {
+          await LocalNotifications.cancel({
+            notifications: matching.map((t) => ({ id: t.notificationId ?? hashStringToInt(t.id) })),
+          });
+        } catch (e) {
+          console.warn('cancelEntityReminders error:', e);
+        }
+        const remaining = prevScheduled.filter((p) => !p.id.startsWith(`${entityId}_`));
+        await indexedDBRepository.setMetadata('native_scheduled_triggers', remaining);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Calculates reminder triggers for a CalendarEvent with rich Arabic content.
    */
   private calculateEventTriggers(evt: CalendarEvent, userTimezone: string): ReminderTrigger[] {
     const list: ReminderTrigger[] = [];
-    const eventDateStr = evt.date || evt.start_time; // YYYY-MM-DD
+    const eventDateStr = evt.date || evt.start_time;
     if (!eventDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(eventDateStr)) {
       return list;
     }
@@ -467,7 +702,9 @@ class ReminderEngineClass {
       if (isNaN(eventStartMs)) return list;
 
       const title = evt.title;
-      const course = evt.course ? ` (${evt.course})` : '';
+      const metadata = formatEventMetadata(evt);
+      const metaSuffix = metadata ? ` (${metadata})` : '';
+      const isUrgent = evt.priority === 'urgent' || evt.priority === 'high';
 
       // 1. Two hours before
       const ms2h = eventStartMs - 2 * 60 * 60 * 1000;
@@ -478,20 +715,21 @@ class ReminderEngineClass {
         triggerTime: ms2h,
         title: `تذكير بموعد: ${title}`,
         body: evt.category === 'lecture'
-          ? `اصحى براحتك، عندك محاضرة${course} الساعة ${timeStr}.`
-          : `فاضل ساعتين على موعد: ${title}.`,
+          ? `فاضل ساعتين على موعد محاضرتك الساعة ${timeStr}${metaSuffix}. جهز نفسك براحتك!`
+          : `فاضل ساعتين على موعد: ${title} الساعة ${timeStr}${metaSuffix}.`,
         notificationType: 'upcoming',
       });
 
       // 2. One hour before
       const ms1h = eventStartMs - 1 * 60 * 60 * 1000;
+      const urgentTag = isUrgent ? ' ⚡ عاجل' : '';
       list.push({
         id: `${evt.id}_evt_1h`,
         entityId: evt.id,
         entityType: 'event',
         triggerTime: ms1h,
         title: `يلا نجهز، فاضل ساعة!`,
-        body: `فاضل ساعة على ${title} الساعة ${timeStr}.`,
+        body: `فاضل ساعة على موعد: ${title} الساعة ${timeStr}${urgentTag}${metaSuffix}.`,
         notificationType: 'upcoming',
       });
 
@@ -502,7 +740,9 @@ class ReminderEngineClass {
         entityType: 'event',
         triggerTime: eventStartMs,
         title: `حان الآن موعد: ${title}`,
-        body: evt.location ? `المكان: ${evt.location}` : `موفق إن شاء الله!`,
+        body: metadata
+          ? `${isUrgent ? '⚡ ' : ''}${metadata} — بالتوفيق!`
+          : `${isUrgent ? '⚡ ' : ''}حان موعدك الآن الساعة ${timeStr}. بالتوفيق!`,
         notificationType: 'upcoming',
       });
     } else {
@@ -540,7 +780,7 @@ class ReminderEngineClass {
   }
 
   /**
-   * Calculates reminder triggers for a TaskItem.
+   * Calculates reminder triggers for a TaskItem with rich Arabic content.
    */
   private calculateTaskTriggers(task: TaskItem, userTimezone: string): ReminderTrigger[] {
     const list: ReminderTrigger[] = [];
@@ -548,6 +788,12 @@ class ReminderEngineClass {
     if (!dueStr || !/^\d{4}-\d{2}-\d{2}$/.test(dueStr)) {
       return list;
     }
+
+    const taskMeta: string[] = [];
+    if (task.category && task.category !== 'عام') taskMeta.push(task.category);
+    const notes = task.notes || task.description;
+    if (notes) taskMeta.push(notes);
+    const metaSuffix = taskMeta.length > 0 ? ` [${taskMeta.join(' • ')}]` : '';
 
     if (task.due_time) {
       const taskStartMs = this.parseDateTimeToMs(dueStr, task.due_time, userTimezone);
@@ -560,7 +806,7 @@ class ReminderEngineClass {
           entityType: 'task',
           triggerTime: ms1h,
           title: task.priority === 'urgent' ? `مهمة عاجلة مستنياك ⚡` : `تذكير بمهمة`,
-          body: `فاضل ساعة على تسليم/إنجاز: "${task.title}". يلا تخلصها وتفضي بالك!`,
+          body: `فاضل ساعة على إنجاز: "${task.title}"${metaSuffix}. يلا تخلصها وتفضي بالك!`,
           notificationType: 'task',
         });
       }
@@ -574,7 +820,7 @@ class ReminderEngineClass {
           entityType: 'task',
           triggerTime: dayBeforeMs,
           title: `تذكير لمهام بكرة 📋`,
-          body: `بكرة عندك شوية حاجات منها: "${task.title}"، بص عليهم قبل ما تنام.`,
+          body: `بكرة عندك شوية حاجات منها: "${task.title}"${metaSuffix}، بص عليهم قبل ما تنام.`,
           notificationType: 'tomorrow',
         });
       }
@@ -672,38 +918,22 @@ class ReminderEngineClass {
 
   // --- Helper Date & Time Parser Functions ---
 
-  private parseDateTimeToMs(dateStr: string, timeStr: string, timezoneStr: string): number {
+  private parseDateTimeToMs(dateStr: string, timeStr: string, timezoneStr: string = 'Africa/Cairo'): number {
     try {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      const [hour, minute] = timeStr.split(':').map(Number);
-
-      // Construct a local ISO string approximation and parse in target timezone
-      const formattedMonth = String(month).padStart(2, '0');
-      const formattedDay = String(day).padStart(2, '0');
-      const formattedHour = String(hour).padStart(2, '0');
-      const formattedMin = String(minute).padStart(2, '0');
-
-      const isoStr = `${year}-${formattedMonth}-${formattedDay}T${formattedHour}:${formattedMin}:00`;
-      
-      // Fallback standard parse
-      return new Date(isoStr).getTime();
+      if (!dateStr || typeof dateStr !== 'string') return NaN;
+      const combined = combineDateAndTime(dateStr, timeStr);
+      return combined.getTime();
     } catch {
       return NaN;
     }
   }
 
-  private getPreviousDayMs(dateStr: string, timeStr: string, timezoneStr: string): number {
+  private getPreviousDayMs(dateStr: string, timeStr: string, timezoneStr: string = 'Africa/Cairo'): number {
     try {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      // Month is 0-indexed in Date constructor, so subtract 1
-      const current = new Date(year, month - 1, day);
-      current.setDate(current.getDate() - 1);
-      
-      const prevYear = current.getFullYear();
-      const prevMonth = String(current.getMonth() + 1).padStart(2, '0');
-      const prevDay = String(current.getDate()).padStart(2, '0');
-      
-      const prevDateStr = `${prevYear}-${prevMonth}-${prevDay}`;
+      if (!dateStr || typeof dateStr !== 'string') return NaN;
+      const baseDate = parseCalendarDate(dateStr);
+      baseDate.setDate(baseDate.getDate() - 1);
+      const prevDateStr = formatCalendarDate(baseDate);
       return this.parseDateTimeToMs(prevDateStr, timeStr, timezoneStr);
     } catch {
       return NaN;

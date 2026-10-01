@@ -11,7 +11,8 @@ router.get('/weekly-summary', requireAuth, async (req: AuthenticatedRequest, res
     const summary = await insightService.getWeeklySummary(req.user!.id, date);
     res.json({ summary });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to generate weekly summary', details: err });
+    console.error('Failed to generate weekly summary:', err);
+    res.status(500).json({ error: 'InsightError', message: 'فشل إنشاء ملخص الأسبوع.' });
   }
 });
 
@@ -22,7 +23,8 @@ router.get('/summary', requireAuth, async (req: AuthenticatedRequest, res: Respo
     const summary = await insightService.getWeeklySummary(req.user!.id, date);
     res.json({ summary });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to generate weekly summary', details: err });
+    console.error('Failed to generate weekly summary:', err);
+    res.status(500).json({ error: 'InsightError', message: 'فشل إنشاء ملخص الأسبوع.' });
   }
 });
 

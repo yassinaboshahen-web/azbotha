@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarEvent, EventCategory } from '../types';
-import { formatTime12h, formatArabicFullDate, getEventStatus, getRelativeDateString } from '../utils/dateUtils';
+import { formatTime12h, formatArabicFullDate, getEventStatus, getRelativeDateString, timeStringToMinutes } from '../utils/dateUtils';
 import {
   X,
   Check,
@@ -99,6 +99,20 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
     if (!title.trim()) {
       setValidationError('اكتب اسم الحاجة الأول.');
       return;
+    }
+
+    if (!time || !time.trim()) {
+      setValidationError('اختار وقت البداية الأول.');
+      return;
+    }
+
+    if (endTime && endTime.trim()) {
+      const startMin = timeStringToMinutes(time);
+      const endMin = timeStringToMinutes(endTime);
+      if (endMin <= startMin) {
+        setValidationError('وقت النهاية لازم يكون بعد وقت البداية.');
+        return;
+      }
     }
 
     if (onUpdateEvent) {
@@ -252,11 +266,14 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-[#243B35] mb-1">من الساعة</label>
+                <label className="block text-xs font-semibold text-[#243B35] mb-1">من الساعة *</label>
                 <input
                   type="time"
                   value={time}
-                  onChange={(e) => setTime(e.target.value)}
+                  onChange={(e) => {
+                    setTime(e.target.value);
+                    if (validationError) setValidationError('');
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-[#E4DED4] text-xs text-[#242522]"
                 />
               </div>
@@ -265,7 +282,10 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
                 <input
                   type="time"
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={(e) => {
+                    setEndTime(e.target.value);
+                    if (validationError) setValidationError('');
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-[#E4DED4] text-xs text-[#242522]"
                 />
               </div>
@@ -426,17 +446,31 @@ export const EventDetailSheet: React.FC<EventDetailSheetProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => {
+                    if (isPast || event.completed) {
+                      sound.playTap();
+                      return;
+                    }
                     sound.playTap();
                     onToggleReminder(event.id);
                   }}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    event.reminder
-                      ? 'bg-[#F4E8DE] border-[#C58B5C] text-[#C58B5C]'
-                      : 'bg-white border-[#E4DED4] text-[#77766F]'
+                  disabled={isPast || event.completed}
+                  title={isPast || event.completed ? 'المعاد وقته فات، مفيش تنبيهات نشطة' : (event.reminder ? 'إيقاف التنبيه' : 'تفعيل التنبيه')}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors ${
+                    isPast || event.completed
+                      ? 'bg-[#F6F3EE] border-[#E4DED4] text-[#A3A198] cursor-default'
+                      : event.reminder
+                      ? 'bg-[#F4E8DE] border-[#C58B5C] text-[#C58B5C] cursor-pointer hover:bg-[#edd9cb]'
+                      : 'bg-white border-[#E4DED4] text-[#77766F] cursor-pointer hover:bg-[#F6F3EE]'
                   }`}
                 >
                   <Bell className="w-3.5 h-3.5" />
-                  <span>{event.reminder ? 'التنبيه مفعل' : 'تفعيل التنبيه'}</span>
+                  <span>
+                    {isPast || event.completed
+                      ? 'موعد منتهي'
+                      : event.reminder
+                      ? 'التنبيه مفعل'
+                      : 'تفعيل التنبيه'}
+                  </span>
                 </button>
 
                 <button

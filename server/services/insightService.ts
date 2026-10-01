@@ -63,9 +63,10 @@ export const insightService = {
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
               FROM tasks
-              WHERE (anonymous_user_id = ? OR user_id = ?)
+              WHERE anonymous_user_id = ?
+                AND (deleted_at IS NULL OR deleted_at = '')
                 AND (due_date BETWEEN ? AND ?)`,
-        args: [userId, userId, startIso, endIso],
+        args: [userId, startIso, endIso],
       });
       totalTasks = Number(taskStats?.total || 0);
       completedTasks = Number(taskStats?.completed || 0);
@@ -73,10 +74,11 @@ export const insightService = {
       const dayTasks = await queryMany<{ due_date: string; count: number }>({
         sql: `SELECT due_date, COUNT(*) as count 
               FROM tasks 
-              WHERE (anonymous_user_id = ? OR user_id = ?) 
+              WHERE anonymous_user_id = ? 
+                AND (deleted_at IS NULL OR deleted_at = '')
                 AND (due_date BETWEEN ? AND ?) 
               GROUP BY due_date`,
-        args: [userId, userId, startIso, endIso],
+        args: [userId, startIso, endIso],
       });
       for (const row of dayTasks) {
         if (row.due_date) {
@@ -96,19 +98,21 @@ export const insightService = {
       const eventStats = await queryOne<{ total: number }>({
         sql: `SELECT COUNT(*) as total
               FROM events
-              WHERE (anonymous_user_id = ? OR user_id = ?)
+              WHERE anonymous_user_id = ?
+                AND (deleted_at IS NULL OR deleted_at = '')
                 AND (date BETWEEN ? AND ?)`,
-        args: [userId, userId, startIso, endIso],
+        args: [userId, startIso, endIso],
       });
       totalEvents = Number(eventStats?.total || 0);
 
       const dayEvents = await queryMany<{ date: string; count: number }>({
         sql: `SELECT date, COUNT(*) as count 
               FROM events 
-              WHERE (anonymous_user_id = ? OR user_id = ?) 
+              WHERE anonymous_user_id = ? 
+                AND (deleted_at IS NULL OR deleted_at = '')
                 AND (date BETWEEN ? AND ?) 
               GROUP BY date`,
-        args: [userId, userId, startIso, endIso],
+        args: [userId, startIso, endIso],
       });
       for (const row of dayEvents) {
         if (row.date) {

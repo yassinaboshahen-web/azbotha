@@ -28,8 +28,8 @@ export async function requireAuth(
     }
 
     if (!anonUserId || !installationToken) {
-      // Allow fallback for default guest installation in non-production environments
-      if (process.env.NODE_ENV !== 'production' && anonUserId === 'anon_default_guest_installation') {
+      // Allow fallback for default guest installation strictly in explicit development environment
+      if (process.env.NODE_ENV === 'development' && anonUserId === 'anon_default_guest_installation') {
         const user = await userService.getOrCreateAnonymousUser(anonUserId);
         req.user = user;
         req.anonymousUserId = anonUserId;

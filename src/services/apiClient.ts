@@ -3,7 +3,7 @@ import { identityService } from './identity';
 
 export const apiClient = {
   isCloudSyncEnabled(): boolean {
-    return Boolean(import.meta.env.VITE_API_BASE_URL);
+    return typeof window !== 'undefined';
   },
 
   getAnonymousUserId(): string {
@@ -280,16 +280,20 @@ export const apiClient = {
 
   // Sync Endpoints
   async pushSyncOperations(operations: any[]): Promise<{ success: boolean; processedCount: number; timestamp: string }> {
+    const mappedOps = operations.map((op) => ({
+      ...op,
+      client_op_id: op.id,
+    }));
     return await this.request('/api/sync/push', {
       method: 'POST',
-      body: JSON.stringify({ operations }),
+      body: JSON.stringify({ operations: mappedOps }),
     });
   },
 
-  async pullCloudChanges(lastPulledAt?: string): Promise<{ timestamp: string; changes: Record<string, any> }> {
+  async pullCloudChanges(lastPulledAt?: string, limit?: number): Promise<{ timestamp: string; since: string | null; hasMore: boolean; changes: Record<string, any> }> {
     return await this.request('/api/sync/pull', {
       method: 'POST',
-      body: JSON.stringify({ last_pulled_at: lastPulledAt }),
+      body: JSON.stringify({ last_pulled_at: lastPulledAt, limit: limit || 200 }),
     });
   },
 

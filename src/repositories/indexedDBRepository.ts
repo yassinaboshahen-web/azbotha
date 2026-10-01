@@ -97,6 +97,9 @@ export const indexedDBRepository = {
   async markAllNotificationsRead() {
     return await notificationRepository.markAllNotificationsRead();
   },
+  async deleteNotification(id: string) {
+    return await notificationRepository.deleteNotification(id);
+  },
 
   // --- Preferences ---
   async getPreferences() {

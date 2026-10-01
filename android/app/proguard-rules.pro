@@ -19,3 +19,20 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor Core & Plugin ProGuard Rules
+-keepattributes *Annotation*
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class com.getcapacitor.** { *; }
+-dontwarn com.getcapacitor.**
+
+# Keep Capacitor Plugins
+-keep class * extends com.getcapacitor.Plugin { *; }
+-keepclassmembers class * extends com.getcapacitor.Plugin {
+    @com.getcapacitor.PluginMethod public *;
+}
+-keep class com.capacitorjs.plugins.** { *; }
+-dontwarn com.capacitorjs.plugins.**

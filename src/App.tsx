@@ -12,6 +12,10 @@ import {
   parseDateString,
   getTodayDateString,
   getRelativeDateString,
+  getTaskDate,
+  getWeekRange,
+  createEventsByDateMap,
+  createTasksByDateMap,
 } from './utils/dateUtils';
 import { sound } from './utils/audio';
 import { getZoomTransitionClass } from './utils/motion';
@@ -32,6 +36,7 @@ import { OfflineBanner, ErrorStateBanner } from './components/OfflineBanner';
 import { TimeFlowSkeleton, WeekSkeleton } from './components/Skeletons';
 import { ToastUndo, ToastMessage } from './components/ToastUndo';
 import { FirstUseIntro } from './components/FirstUseIntro';
+import { ScheduleExportModal } from './components/ScheduleExportModal';
 import { Plus, StickyNote, Trash2 } from 'lucide-react';
 
 // IndexedDB Repository, Sync Layer & Reminder Engine
@@ -79,6 +84,7 @@ export default function App() {
   const [isQuickAddOpen, setIsQuickAddOpen] = useState<boolean>(false);
   const [selectedEventForDetail, setSelectedEventForDetail] = useState<CalendarEvent | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
+  const [isDayExportOpen, setIsDayExportOpen] = useState<boolean>(false);
   const [showStorageWarning, setShowStorageWarning] = useState<boolean>(false);
 
   const todayStr = getTodayDateString();
@@ -88,31 +94,42 @@ export default function App() {
   // Initialize Anonymous Installation Identity & Fast Local IndexedDB Data on Mount
   useEffect(() => {
     let listenerHandle: any = null;
+    let isUnmounted = false;
 
     async function initIndexedDBAndSync() {
       // Setup Native Listener
-      const { LocalNotifications } = await import('@capacitor/local-notifications');
-      listenerHandle = await LocalNotifications.addListener('localNotificationActionPerformed', (notif) => {
-        const entityId = notif.notification.extra?.entityId;
-        const entityType = notif.notification.extra?.entityType;
-        
-        if (entityId) {
-            if (entityType === 'task') {
-                const task = tasksRef.current.find((t: TaskItem) => t.id === entityId);
-                if (task) {
-                    setSelectedDate(task.due_date || task.date || todayStr);
-                    setZoomLevel('day');
-                }
-            } else if (entityType === 'event') {
-                const event = eventsRef.current.find((e: CalendarEvent) => e.id === entityId);
-                if (event) {
-                    setSelectedEventForDetail(event);
-                    setSelectedDate(event.date);
-                    setZoomLevel('day');
-                }
-            }
+      try {
+        const { LocalNotifications } = await import('@capacitor/local-notifications');
+        const handle = await LocalNotifications.addListener('localNotificationActionPerformed', (notif) => {
+          const entityId = notif.notification.extra?.entityId;
+          const entityType = notif.notification.extra?.entityType;
+          
+          if (entityId) {
+              if (entityType === 'task') {
+                  const task = tasksRef.current.find((t: TaskItem) => t.id === entityId);
+                  if (task) {
+                      setSelectedDate(getTaskDate(task) || todayStr);
+                      setZoomLevel('day');
+                  }
+              } else if (entityType === 'event') {
+                  const event = eventsRef.current.find((e: CalendarEvent) => e.id === entityId);
+                  if (event) {
+                      setSelectedEventForDetail(event);
+                      setSelectedDate(event.date);
+                      setZoomLevel('day');
+                  }
+              }
+          }
+        });
+
+        if (isUnmounted) {
+          handle.remove();
+        } else {
+          listenerHandle = handle;
         }
-      });
+      } catch {
+        // Not on native or unsupported
+      }
 
       setIsLoadingView(true);
       
@@ -186,6 +203,7 @@ export default function App() {
             setEvents(synced.events);
             setThoughts(synced.reminders);
             setNotifications(synced.notifications);
+            ReminderEngine.checkAndFireReminders().catch(() => {});
           }
         } catch {
           // Continue seamlessly in local-first mode
@@ -201,6 +219,7 @@ export default function App() {
     initIndexedDBAndSync();
 
     return () => {
+      isUnmounted = true;
       ReminderEngine.stopTicker();
       if (listenerHandle) {
           listenerHandle.remove();
@@ -225,12 +244,15 @@ export default function App() {
     };
   }, [isCloudEnabled]);
 
-  // Native Android back button interception using Capacitor App plugin
+  // Native Android back button & appStateChange listeners using Capacitor App plugin
   useEffect(() => {
-    let activeListener: any = null;
-    
+    let isCancelled = false;
+    let backListenerHandle: { remove: () => void } | null = null;
+    let stateListenerHandle: { remove: () => void } | null = null;
+
     import('@capacitor/app').then(({ App }) => {
-      App.addListener('backButton', (data) => {
+      if (isCancelled) return;
+      App.addListener('backButton', () => {
         if (isQuickAddOpen) {
           setIsQuickAddOpen(false);
         } else if (isNotificationsOpen) {
@@ -242,15 +264,35 @@ export default function App() {
           App.minimizeApp();
         }
       }).then(listener => {
-        activeListener = listener;
+        if (isCancelled) {
+          listener.remove();
+        } else {
+          backListenerHandle = listener;
+        }
+      });
+
+      App.addListener('appStateChange', (state) => {
+        if (state.isActive) {
+          ReminderEngine.checkAndFireReminders().catch(() => {});
+        }
+      }).then(listener => {
+        if (isCancelled) {
+          listener.remove();
+        } else {
+          stateListenerHandle = listener;
+        }
       });
     }).catch(() => {
       // Ignore if not running on native mobile shell
     });
 
     return () => {
-      if (activeListener) {
-        activeListener.remove();
+      isCancelled = true;
+      if (backListenerHandle) {
+        backListenerHandle.remove();
+      }
+      if (stateListenerHandle) {
+        stateListenerHandle.remove();
       }
     };
   }, [isQuickAddOpen, isNotificationsOpen, selectedEventForDetail]);
@@ -264,21 +306,28 @@ export default function App() {
     }
   };
 
+  // High performance memoized maps of events and tasks by date
+  const eventsByDate = useMemo(() => createEventsByDateMap(events), [events]);
+  const tasksByDate = useMemo(() => createTasksByDateMap(tasks), [tasks]);
+
   // Memoized Filtered events & tasks for active selected day
-  const currentDayEvents = useMemo(() => events.filter((e) => e.date === selectedDate), [events, selectedDate]);
+  const currentDayEvents = useMemo(() => eventsByDate[selectedDate] || [], [eventsByDate, selectedDate]);
   const currentDayTasks = useMemo(() => {
     if (isToday) {
-        return tasks.filter((t) => (t.date === selectedDate || !t.date));
+      return tasks.filter((t) => (getTaskDate(t) === selectedDate || !getTaskDate(t)));
     }
-    return tasks.filter((t) => t.date === selectedDate);
-  }, [tasks, selectedDate, isToday]);
+    return tasksByDate[selectedDate] || [];
+  }, [tasks, tasksByDate, selectedDate, isToday]);
 
   const overdueTasks = useMemo(() => {
       if (!isToday) return [];
-      return tasks.filter(t => t.date && t.date < selectedDate && !t.completed);
+      return tasks.filter(t => {
+        const d = getTaskDate(t);
+        return d && d < selectedDate && !t.completed;
+      });
   }, [tasks, selectedDate, isToday]);
-  const tomorrowEvents = useMemo(() => events.filter((e) => e.date === tomorrowStr), [events, tomorrowStr]);
-  const tomorrowTasks = useMemo(() => tasks.filter((t) => t.date === tomorrowStr), [tasks, tomorrowStr]);
+  const tomorrowEvents = useMemo(() => eventsByDate[tomorrowStr] || [], [eventsByDate, tomorrowStr]);
+  const tomorrowTasks = useMemo(() => tasksByDate[tomorrowStr] || [], [tasksByDate, tomorrowStr]);
 
   const unreadNotifsCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
@@ -298,6 +347,24 @@ export default function App() {
   const handleJumpToToday = () => {
     setSelectedDate(todayStr);
     setZoomLevel('day');
+  };
+
+  const isCurrentPeriod = useMemo(() => {
+    if (zoomLevel === 'day') {
+      return selectedDate === todayStr;
+    }
+    if (zoomLevel === 'week') {
+      const currentWeek = getWeekRange(todayStr);
+      return selectedDate >= currentWeek.startDate && selectedDate <= currentWeek.endDate;
+    }
+    if (zoomLevel === 'month') {
+      return selectedDate.slice(0, 7) === todayStr.slice(0, 7);
+    }
+    return true;
+  }, [zoomLevel, selectedDate, todayStr]);
+
+  const handleJumpToCurrent = () => {
+    setSelectedDate(todayStr);
   };
 
   const handleGoToTomorrow = () => {
@@ -352,11 +419,20 @@ export default function App() {
   ) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const newToast: ToastMessage = { id, type, message, undoAction, undoLabel };
-    setToasts((prev) => [...prev, newToast]);
 
+    setToasts((prev) => {
+      // (أ) Merge duplicate toasts with the exact same message
+      const filtered = prev.filter((t) => t.message !== message);
+      // (ب) Limit to max 2 toasts visible at once, older one removed
+      const trimmed = filtered.length >= 2 ? filtered.slice(filtered.length - 1) : filtered;
+      return [...trimmed, newToast];
+    });
+
+    // (د) 2.5s duration for success toasts
+    const duration = type === 'success' ? 2500 : 4000;
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
+    }, duration);
   };
 
   const removeToast = (id: string) => {
@@ -397,6 +473,7 @@ export default function App() {
     });
 
     syncService.flushSyncQueue();
+    ReminderEngine.checkAndFireReminders().catch(() => {});
     pendingEventTogglesRef.current.delete(eventId);
   };
 
@@ -422,6 +499,7 @@ export default function App() {
       payload: { reminder: nextReminder },
     });
     syncService.flushSyncQueue();
+    ReminderEngine.checkAndFireReminders().catch(() => {});
   };
 
   const handleDeleteEvent = async (eventId: string) => {
@@ -443,6 +521,7 @@ export default function App() {
     });
 
     syncService.flushSyncQueue();
+    ReminderEngine.checkAndFireReminders().catch(() => {});
 
     addToast(
       'اتحذف المعاد.',
@@ -457,6 +536,7 @@ export default function App() {
           payload: deletedEvent as any,
         });
         syncService.flushSyncQueue();
+        ReminderEngine.checkAndFireReminders().catch(() => {});
       },
       'تراجع'
     );
@@ -480,6 +560,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
       addToast('اتحفظت التعديلات 👌', 'success');
     } catch {
       setEvents((prev) => prev.map((e) => (e.id === updatedEvent.id ? previous : e)));
@@ -508,6 +589,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
       addToast('اترحل المعاد لليوم التاني 👌', 'success');
     } catch {
       setEvents((prev) => prev.map((e) => (e.id === eventId ? previous : e)));
@@ -579,6 +661,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
     } catch {
       setTasks((prev) =>
         prev.map((t) => (t.id === taskId ? target : t))
@@ -651,10 +734,12 @@ export default function App() {
     }
   };
 
-  const handleUpdateTask = async (taskId: string, newTitle: string) => {
+  const handleUpdateTask = async (taskId: string, updatedData: string | Partial<TaskItem>) => {
     const previous = tasks.find((t) => t.id === taskId);
     if (!previous) return;
-    const updatedTask = { ...previous, title: newTitle };
+    const updatedTask: TaskItem = typeof updatedData === 'string'
+      ? { ...previous, title: updatedData }
+      : { ...previous, ...updatedData };
 
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? updatedTask : t))
@@ -667,10 +752,11 @@ export default function App() {
         entityType: 'task',
         action: 'update',
         entityId: taskId,
-        payload: { title: newTitle },
+        payload: typeof updatedData === 'string' ? { title: updatedData } : updatedData,
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
       addToast('اتحفظت المهمة 👌', 'success');
     } catch {
       setTasks((prev) =>
@@ -697,6 +783,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
 
       addToast(
         'اتحذفت المهمة.',
@@ -718,6 +805,7 @@ export default function App() {
               },
             });
             syncService.flushSyncQueue();
+            ReminderEngine.checkAndFireReminders().catch(() => {});
           } catch {
             addToast('مقدرناش نرجع المهمة ❌', 'error');
           }
@@ -759,6 +847,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
       addToast('اتسجلت الملاحظة 👌', 'success');
     } catch {
       setThoughts((prev) => prev.filter((t) => t.id !== newThought.id));
@@ -783,6 +872,7 @@ export default function App() {
       });
 
       syncService.flushSyncQueue();
+      ReminderEngine.checkAndFireReminders().catch(() => {});
 
       addToast(
         'اتحذفت الخاطرة.',
@@ -808,6 +898,7 @@ export default function App() {
               },
             });
             syncService.flushSyncQueue();
+            ReminderEngine.checkAndFireReminders().catch(() => {});
           } catch {
             addToast('مقدرناش نرجع الخاطرة ❌', 'error');
           }
@@ -869,6 +960,14 @@ export default function App() {
         onJumpToToday={handleJumpToToday}
       />
 
+      {/* Offline Status Banner */}
+      <OfflineBanner
+        isOffline={isOffline}
+        onRetry={() => {
+          if (isCloudEnabled) syncService.flushSyncQueue();
+        }}
+      />
+
       {/* Temporal Lens Zoom Controller (اليوم / الأسبوع / الشهر) */}
       <TemporalLens currentLevel={zoomLevel} onChange={handleZoomChange} />
 
@@ -902,11 +1001,14 @@ export default function App() {
                   currentDateStr={selectedDate}
                   onPrevDay={handlePrevDay}
                   onNextDay={handleNextDay}
+                  onSelectDate={(d) => setSelectedDate(d)}
+                  onJumpToToday={handleJumpToToday}
                   events={currentDayEvents}
                   tasks={currentDayTasks}
                   tomorrowEvents={tomorrowEvents}
                   tomorrowTasks={tomorrowTasks}
                   onSelectNextEvent={(evt) => setSelectedEventForDetail(evt)}
+                  onOpenExport={() => setIsDayExportOpen(true)}
                 />
 
                 {/* Adaptive Layout: Side-by-side contextual arrangement on desktop (lg+), clean single vertical flow on mobile */}
@@ -989,6 +1091,7 @@ export default function App() {
                 onChangeDate={(dateStr) => {
                   setSelectedDate(dateStr);
                 }}
+                onShowToast={addToast}
               />
             )}
 
@@ -1001,24 +1104,25 @@ export default function App() {
                   setSelectedDate(dateStr);
                   setZoomLevel('day');
                 }}
+                onShowToast={addToast}
               />
             )}
           </div>
         )}
       </main>
 
-      {/* Floating Action Button: "+ وراك إيه؟" */}
-      <div className="fixed bottom-6 right-6 sm:right-8 z-40">
+      {/* Floating Action Button: "وراك إيه؟" */}
+      <div className="fixed bottom-6 end-6 sm:end-8 z-40">
         <button
           onClick={() => {
             sound.playPop();
             setIsQuickAddOpen(true);
           }}
-          className="flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-[#243B35] text-[#F6F3EE] font-bold text-sm sm:text-base shadow-xl shadow-[#243B35]/25 hover:bg-[#1b2d28] hover:shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer border border-[#D8C3A5]/40"
+          className="flex items-center gap-2 px-5 py-3.5 rounded-full bg-[#243B35] text-[#F6F3EE] font-bold text-sm sm:text-base shadow-xl shadow-[#243B35]/25 hover:bg-[#1b2d28] hover:shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer border border-[#D8C3A5]/40"
           aria-label="إضافة معاد أو مهمة جديدة"
         >
-          <Plus className="w-5 h-5 text-[#D8C3A5]" />
-          <span>+ وراك إيه؟</span>
+          <Plus className="w-5 h-5 text-[#D8C3A5] shrink-0" />
+          <span>وراك إيه؟</span>
         </button>
       </div>
 
@@ -1032,6 +1136,7 @@ export default function App() {
           onAddEvent={handleAddEvent}
           onAddTask={handleAddTask}
           onAddThought={handleAddThought}
+          existingEvents={events}
         />
       )}
 
@@ -1054,6 +1159,17 @@ export default function App() {
         onNotificationClick={handleNotificationClick}
         onMarkAllRead={handleMarkAllNotifsRead}
       />
+
+      {/* Day Export Modal */}
+      {isDayExportOpen && (
+        <ScheduleExportModal
+          isOpen={isDayExportOpen}
+          onClose={() => setIsDayExportOpen(false)}
+          mode="day"
+          currentDateStr={selectedDate}
+          onShowToast={addToast}
+        />
+      )}
 
       {/* Undo & Action Toast Notifications */}
       <ToastUndo toasts={toasts} onDismiss={removeToast} />
