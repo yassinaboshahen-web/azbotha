@@ -37,15 +37,18 @@ export function calculateSafeScale(logicalHeight: number, logicalWidth: number =
 export async function ensureFontsLoaded(): Promise<void> {
   if (typeof document !== 'undefined' && document.fonts && document.fonts.load) {
     try {
-      await Promise.all([
-        document.fonts.load('400 20px Tajawal'),
-        document.fonts.load('500 20px Tajawal'),
-        document.fonts.load('600 20px Tajawal'),
-        document.fonts.load('700 24px Tajawal'),
-        document.fonts.ready,
+      await Promise.race([
+        Promise.all([
+          document.fonts.load('400 20px Tajawal').catch(() => {}),
+          document.fonts.load('500 20px Tajawal').catch(() => {}),
+          document.fonts.load('600 20px Tajawal').catch(() => {}),
+          document.fonts.load('700 24px Tajawal').catch(() => {}),
+          document.fonts.ready.catch(() => {}),
+        ]),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
       ]);
     } catch (e) {
-      console.warn('Font loading check notice:', e);
+      console.warn('Font loading notice:', e);
     }
   }
 }

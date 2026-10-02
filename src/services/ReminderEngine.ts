@@ -138,6 +138,29 @@ class ReminderEngineClass {
         lightColor: '#243B35',
       });
 
+      try {
+        await LocalNotifications.registerActionTypes({
+          types: [
+            {
+              id: 'REMINDER_ACTIONS',
+              actions: [
+                {
+                  id: 'stop',
+                  title: 'إيقاف ⏹️',
+                  destructive: true,
+                },
+                {
+                  id: 'snooze',
+                  title: 'تأجيل 10 دقائق ⏰',
+                },
+              ],
+            },
+          ],
+        });
+      } catch {
+        // ignore
+      }
+
       this.channelConfigured = true;
     } catch (e) {
       console.warn('Notification channel setup failed or not supported in this environment:', e);
@@ -304,6 +327,9 @@ class ReminderEngineClass {
             sound: REMINDER_SOUND,
             schedule: { at: testDate, allowWhileIdle: true },
             extra: { type: 'test' },
+            autoCancel: false,
+            ongoing: true,
+            actionTypeId: 'REMINDER_ACTIONS',
           },
         ],
       });
@@ -380,6 +406,9 @@ class ReminderEngineClass {
                 sound: REMINDER_SOUND,
                 schedule: { at: testDate, allowWhileIdle: true },
                 extra: { type: 'diagnostic' },
+                autoCancel: false,
+                ongoing: true,
+                actionTypeId: 'REMINDER_ACTIONS',
               },
             ],
           });
@@ -557,6 +586,9 @@ class ReminderEngineClass {
               sound: REMINDER_SOUND,
               schedule: { at: new Date(t.triggerTime), allowWhileIdle: true },
               extra: { entityId: t.entityId, entityType: t.entityType },
+              autoCancel: false,
+              ongoing: true,
+              actionTypeId: 'REMINDER_ACTIONS',
             };
           }),
         });
@@ -753,6 +785,9 @@ class ReminderEngineClass {
             sound: REMINDER_SOUND,
             schedule: { at: s.triggerDate, allowWhileIdle: true },
             extra: { type: 'daily_summary_5pm', targetDate: s.targetTomorrowStr },
+            autoCancel: false,
+            ongoing: true,
+            actionTypeId: 'REMINDER_ACTIONS',
           })),
         });
       }

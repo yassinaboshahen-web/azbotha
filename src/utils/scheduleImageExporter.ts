@@ -42,32 +42,21 @@ export async function saveOrDownloadImage(
   const uniqueFilename = `azbotha_${Date.now()}_${cleanFilename}`;
 
   if (isNative) {
-    try {
-      const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+    const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+    const candidateLocations = [
+      { directory: Directory.Documents, path: uniqueFilename },
+      { directory: Directory.External, path: uniqueFilename },
+      { directory: Directory.Data, path: uniqueFilename },
+      { directory: Directory.Cache, path: uniqueFilename },
+    ];
 
-      // Save to Android MediaStore / Pictures directory so it indexes in Gallery / Photos immediately
-      const writeResult = await Filesystem.writeFile({
-        path: `Pictures/${uniqueFilename}`,
-        data: base64Data,
-        directory: Directory.ExternalStorage,
-        recursive: true,
-      });
-
-      return {
-        success: true,
-        dataUrl,
-        fileUri: writeResult.uri,
-        filename: uniqueFilename,
-        isNative: true,
-      };
-    } catch (nativeErr: any) {
-      console.warn('ExternalStorage save error, trying Documents directory:', nativeErr);
+    let lastError: any = null;
+    for (const loc of candidateLocations) {
       try {
-        const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
         const writeResult = await Filesystem.writeFile({
-          path: `Pictures/${uniqueFilename}`,
+          path: loc.path,
           data: base64Data,
-          directory: Directory.Documents,
+          directory: loc.directory,
           recursive: true,
         });
 
@@ -78,11 +67,13 @@ export async function saveOrDownloadImage(
           filename: uniqueFilename,
           isNative: true,
         };
-      } catch (docErr: any) {
-        console.error('Failed to save image to device storage:', docErr);
-        throw new Error(docErr?.message || nativeErr?.message || 'تعذر حفظ الصورة في معرض الصور');
+      } catch (err) {
+        lastError = err;
+        console.warn(`Failed writing image to directory ${loc.directory}:`, err);
       }
     }
+
+    throw new Error(lastError?.message || 'تعذر حفظ الصورة في ذاكرة الهاتف');
   }
 
   try {
