@@ -144,6 +144,19 @@ export default function App() {
         // 1. Initialize IndexedDB & create anonymous installation user
         await indexedDBRepository.initialize();
 
+        // Check & request notification permission on startup (Realme C3 / Android requirement)
+        try {
+          const pStatus = await ReminderEngine.getNotificationPermissionStatus();
+          console.log('[Startup] Notification permission status:', pStatus);
+          if (pStatus !== 'granted') {
+            console.log('[Startup] Requesting notification permission immediately...');
+            await ReminderEngine.requestNotificationPermission();
+          }
+          await ReminderEngine.ensureNotificationChannel();
+        } catch (notifErr) {
+          console.warn('[Startup] Notification permission request error:', notifErr);
+        }
+
         // 1b. Capture Daily Snapshot on launch
         const { snapshotService } = await import('./services/snapshotService');
         await snapshotService.captureDailyLaunchSnapshot().catch(() => {});

@@ -38,6 +38,8 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
   const [permStatus, setPermStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
   const [exactAlarmStatus, setExactAlarmStatus] = useState<'granted' | 'denied' | 'unsupported'>('granted');
   const [showBatteryHelp, setShowBatteryHelp] = useState(false);
+  const [diagnosticReport, setDiagnosticReport] = useState<any | null>(null);
+  const [isRunningDiag, setIsRunningDiag] = useState(false);
   const [testNotificationState, setTestNotificationState] = useState<{
     status: 'idle' | 'scheduling' | 'success' | 'error';
     message?: string;
@@ -52,6 +54,19 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
     ]);
     setPermStatus(pStatus);
     setExactAlarmStatus(eStatus);
+  };
+
+  const handleRunDiagnostics = async () => {
+    sound.playPop();
+    setIsRunningDiag(true);
+    try {
+      const report = await ReminderEngine.runNotificationDiagnostics();
+      setDiagnosticReport(report);
+    } catch (err: any) {
+      setDiagnosticReport({ error: err?.message || String(err) });
+    } finally {
+      setIsRunningDiag(false);
+    }
   };
 
   useEffect(() => {
@@ -217,60 +232,100 @@ export const NotificationSheet: React.FC<NotificationSheetProps> = ({
           </div>
         )}
 
-        {/* 3. Action Tools: Test Notification & Battery Help */}
-        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {/* Test Notification Button */}
-          <button
-            type="button"
-            onClick={handleTestNotification}
-            disabled={testNotificationState.status === 'scheduling'}
-            className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs group"
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-lg bg-[#243B35]/10 text-[#243B35] flex items-center justify-center shrink-0">
-                <Volume2 className="w-3.5 h-3.5" />
+        {/* 3. Action Tools: Test Notification, Diagnostics & Battery Help */}
+        <div className="mb-4 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Test Notification Button */}
+            <button
+              type="button"
+              onClick={handleTestNotification}
+              disabled={testNotificationState.status === 'scheduling'}
+              className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs group"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg bg-[#243B35]/10 text-[#243B35] flex items-center justify-center shrink-0">
+                  <Volume2 className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-[#243B35] block truncate">
+                    جرّب التنبيه دلوقتي
+                  </span>
+                  <span className="text-[10px] text-[#77766F] block truncate">
+                    تنبيه تجريبي بعد 10 ثوانٍ
+                  </span>
+                </div>
               </div>
-              <div className="min-w-0">
-                <span className="text-xs font-bold text-[#243B35] block truncate">
-                  جرّب التنبيه دلوقتي
-                </span>
-                <span className="text-[10px] text-[#77766F] block truncate">
-                  تنبيه تجريبي بعد 10 ثوانٍ
-                </span>
-              </div>
-            </div>
-            <Zap className="w-3.5 h-3.5 text-[#C58B5C] group-hover:scale-110 transition-transform shrink-0" />
-          </button>
+              <Zap className="w-3.5 h-3.5 text-[#C58B5C] group-hover:scale-110 transition-transform shrink-0" />
+            </button>
 
-          {/* Battery Help Toggle */}
+            {/* Battery Help Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTap();
+                setShowBatteryHelp(!showBatteryHelp);
+              }}
+              className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg bg-[#6F8F78]/15 text-[#2E6B56] flex items-center justify-center shrink-0">
+                  <BatteryCharging className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-[#243B35] block truncate">
+                    لو التنبيهات بتتأخر؟
+                  </span>
+                  <span className="text-[10px] text-[#77766F] block truncate">
+                    حلول توفير بطارية شاومي وسامسونج
+                  </span>
+                </div>
+              </div>
+              {showBatteryHelp ? (
+                <ChevronUp className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
+              )}
+            </button>
+          </div>
+
+          {/* Diagnostic Check Button */}
           <button
             type="button"
-            onClick={() => {
-              sound.playTap();
-              setShowBatteryHelp(!showBatteryHelp);
-            }}
-            className="p-2.5 rounded-2xl bg-white border border-[#E4DED4] hover:border-[#243B35] hover:bg-[#F2ECE1] transition-all flex items-center justify-between gap-2 text-start cursor-pointer shadow-xs"
+            onClick={handleRunDiagnostics}
+            disabled={isRunningDiag}
+            className="w-full p-2.5 rounded-2xl bg-[#243B35] text-[#F6F3EE] hover:bg-[#1b2d28] transition-all flex items-center justify-center gap-2 text-xs font-bold cursor-pointer shadow-xs active:scale-95"
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-lg bg-[#6F8F78]/15 text-[#2E6B56] flex items-center justify-center shrink-0">
-                <BatteryCharging className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-xs font-bold text-[#243B35] block truncate">
-                  لو التنبيهات بتتأخر؟
-                </span>
-                <span className="text-[10px] text-[#77766F] block truncate">
-                  حلول توفير بطارية شاومي وسامسونج
-                </span>
-              </div>
-            </div>
-            {showBatteryHelp ? (
-              <ChevronUp className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5 text-[#77766F] shrink-0" />
-            )}
+            <Sparkles className="w-4 h-4 text-[#D8C3A5]" />
+            <span>{isRunningDiag ? 'جاري تشخيص نظام التنبيهات...' : 'تشخيص نظام التنبيهات الشامل (Realme / Android Diagnostics)'}</span>
           </button>
         </div>
+
+        {/* Diagnostic Report Output */}
+        {diagnosticReport && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-white border border-[#243B35]/30 space-y-2 text-xs font-mono text-[#243B35] animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-[#E4DED4] pb-1.5 font-bold">
+              <span>🔬 تقرير تشخيص الإشعارات</span>
+              <button onClick={() => setDiagnosticReport(null)} className="text-[10px] text-red-600 cursor-pointer">إغلاق</button>
+            </div>
+            {diagnosticReport.error ? (
+              <p className="text-red-600">خطأ في التشخيص: {diagnosticReport.error}</p>
+            ) : (
+              <div className="space-y-1 text-[11px] text-[#333]">
+                <p>• إذن الإشعارات (POST_NOTIFICATIONS): <strong>{String(diagnosticReport.checkPermissionsResult?.display || diagnosticReport.checkPermissionsResult?.error)}</strong></p>
+                <p>• طلب الإذن (Request): <strong>{String(diagnosticReport.requestPermissionsResult?.display || diagnosticReport.requestPermissionsResult?.error)}</strong></p>
+                <p>• المنبّه الدقيق (Exact Alarm): <strong>{String(diagnosticReport.exactAlarmResult?.exact_alarm || diagnosticReport.exactAlarmResult?.error)}</strong></p>
+                <p>• إنشاء القناة (Channel): <strong>{diagnosticReport.channelCreated ? 'تم بنجاح (High Importance)' : 'فشل'}</strong></p>
+                <p>• التنبيهات المنتظرة (Pending): <strong>{diagnosticReport.pendingCount}</strong></p>
+                {diagnosticReport.pendingCount > 0 && (
+                  <div className="bg-[#F6F3EE] p-1.5 rounded max-h-24 overflow-y-auto text-[10px]">
+                    {JSON.stringify(diagnosticReport.pendingNotifications, null, 2)}
+                  </div>
+                )}
+                <p>• جدولة التنبيه التجريبي: <strong>{diagnosticReport.testScheduleResult?.success ? `نجح (ID: ${diagnosticReport.testScheduleResult.notificationId})` : `فشل: ${diagnosticReport.testScheduleResult?.error}`}</strong></p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Test Notification Feedback Message */}
         {testNotificationState.status === 'success' && (

@@ -317,6 +317,113 @@ class ReminderEngineClass {
   }
 
   /**
+   * Runs complete notification diagnostics for Realme C3 / Android debugging.
+   */
+  async runNotificationDiagnostics(): Promise<{
+    checkPermissionsResult: any;
+    requestPermissionsResult: any;
+    exactAlarmResult: any;
+    channelCreated: boolean;
+    pendingCount: number;
+    pendingNotifications: any[];
+    testScheduleResult: { success: boolean; notificationId?: number; executionTime?: string; error?: string };
+  }> {
+    let checkPermissionsResult: any = null;
+    let requestPermissionsResult: any = null;
+    let exactAlarmResult: any = null;
+    let channelCreated = false;
+    let pendingCount = 0;
+    let pendingNotifications: any[] = [];
+    let testScheduleResult: any = { success: false };
+
+    try {
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        try {
+          checkPermissionsResult = await LocalNotifications.checkPermissions();
+          console.log('[Diagnostics] checkPermissions:', checkPermissionsResult);
+        } catch (e: any) {
+          checkPermissionsResult = { error: e?.message || String(e) };
+        }
+
+        try {
+          requestPermissionsResult = await LocalNotifications.requestPermissions();
+          console.log('[Diagnostics] requestPermissions:', requestPermissionsResult);
+        } catch (e: any) {
+          requestPermissionsResult = { error: e?.message || String(e) };
+        }
+
+        try {
+          exactAlarmResult = await LocalNotifications.checkExactNotificationSetting();
+          console.log('[Diagnostics] checkExactNotificationSetting:', exactAlarmResult);
+        } catch (e: any) {
+          exactAlarmResult = { error: e?.message || String(e) };
+        }
+
+        try {
+          await this.ensureNotificationChannel();
+          channelCreated = true;
+          console.log('[Diagnostics] Notification Channel created successfully:', REMINDER_CHANNEL_ID);
+        } catch (e: any) {
+          console.warn('[Diagnostics] Channel creation error:', e);
+        }
+
+        const testId = hashStringToInt(`diag_test_${Date.now()}`);
+        const testDate = new Date(Date.now() + 10000);
+        try {
+          await LocalNotifications.schedule({
+            notifications: [
+              {
+                id: testId,
+                title: 'فحص إشعارات ازبطها 🔬',
+                body: `التنبيه شغال على جهازك! رقم ID: ${testId}`,
+                channelId: REMINDER_CHANNEL_ID,
+                sound: REMINDER_SOUND,
+                schedule: { at: testDate, allowWhileIdle: true },
+                extra: { type: 'diagnostic' },
+              },
+            ],
+          });
+          testScheduleResult = {
+            success: true,
+            notificationId: testId,
+            executionTime: testDate.toISOString(),
+          };
+          console.log('[Diagnostics] Test notification scheduled successfully, ID:', testId, 'At:', testDate);
+        } catch (err: any) {
+          const realErr = err?.message || String(err);
+          console.error('[Diagnostics] LocalNotifications.schedule() FAILED:', realErr);
+          testScheduleResult = { success: false, error: realErr };
+        }
+
+        try {
+          const pending = await LocalNotifications.getPending();
+          pendingCount = pending.notifications.length;
+          pendingNotifications = pending.notifications;
+          console.log('[Diagnostics] Pending Notifications count:', pendingCount, pendingNotifications);
+        } catch (e: any) {
+          console.warn('[Diagnostics] getPending error:', e);
+        }
+      } else {
+        checkPermissionsResult = { display: Notification.permission };
+        channelCreated = true;
+        testScheduleResult = { success: true, note: 'Web browser environment' };
+      }
+    } catch (err: any) {
+      console.error('[Diagnostics] Fatal diagnostic error:', err);
+    }
+
+    return {
+      checkPermissionsResult,
+      requestPermissionsResult,
+      exactAlarmResult,
+      channelCreated,
+      pendingCount,
+      pendingNotifications,
+      testScheduleResult,
+    };
+  }
+
+  /**
    * Start the periodic ticker loop (every 25 seconds).
    */
   startTicker(onNotificationFired?: (notif: NotificationItem) => void): void {
