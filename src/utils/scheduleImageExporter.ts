@@ -50,12 +50,11 @@ export async function saveOrDownloadImage(
   if (isNative) {
     const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
     const candidatePaths = [
-      { directory: Directory.ExternalStorage, path: `Pictures/${uniqueFilename}` },
-      { directory: Directory.Documents, path: `Pictures/${uniqueFilename}` },
-      { directory: Directory.Documents, path: uniqueFilename },
-      { directory: Directory.External, path: uniqueFilename },
-      { directory: Directory.Cache, path: uniqueFilename },
-    ];
+  {
+    directory: Directory.Documents,
+    path: `Pictures/Azbotha/${uniqueFilename}`,
+  },
+];
 
     let writtenUri: string | null = null;
     let lastError: any = null;
