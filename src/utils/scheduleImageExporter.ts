@@ -1,6 +1,12 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+
+interface MediaStoreScannerPlugin {
+  scanFile(options: { path: string }): Promise<{ uri: string; path: string }>;
+}
+
+const MediaStoreScanner = registerPlugin<MediaStoreScannerPlugin>('MediaStoreScanner');
 
 export interface ExportResult {
   success: boolean;
@@ -62,6 +68,17 @@ export async function saveOrDownloadImage(
           directory: cand.directory,
           recursive: true,
         });
+
+        // Trigger Android MediaStore Scanner so image appears in Gallery & Photos instantly
+        try {
+          let filePath = writeResult.uri;
+          if (filePath.startsWith('file://')) {
+            filePath = filePath.replace('file://', '');
+          }
+          await MediaStoreScanner.scanFile({ path: filePath });
+        } catch (scanErr) {
+          console.warn('MediaStore scan notice:', scanErr);
+        }
 
         // Verify file existence actually succeeded
         try {
