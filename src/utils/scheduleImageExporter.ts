@@ -43,37 +43,54 @@ export async function saveOrDownloadImage(
 
   if (isNative) {
     const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-    const candidateLocations = [
+    const candidatePaths = [
+      { directory: Directory.ExternalStorage, path: `Pictures/${uniqueFilename}` },
+      { directory: Directory.Documents, path: `Pictures/${uniqueFilename}` },
       { directory: Directory.Documents, path: uniqueFilename },
       { directory: Directory.External, path: uniqueFilename },
-      { directory: Directory.Data, path: uniqueFilename },
       { directory: Directory.Cache, path: uniqueFilename },
     ];
 
+    let writtenUri: string | null = null;
     let lastError: any = null;
-    for (const loc of candidateLocations) {
+
+    for (const cand of candidatePaths) {
       try {
         const writeResult = await Filesystem.writeFile({
-          path: loc.path,
+          path: cand.path,
           data: base64Data,
-          directory: loc.directory,
+          directory: cand.directory,
           recursive: true,
         });
 
-        return {
-          success: true,
-          dataUrl,
-          fileUri: writeResult.uri,
-          filename: uniqueFilename,
-          isNative: true,
-        };
+        // Verify file existence actually succeeded
+        try {
+          await Filesystem.stat({
+            path: cand.path,
+            directory: cand.directory,
+          });
+          writtenUri = writeResult.uri;
+          break;
+        } catch (statErr) {
+          console.warn('Stat check failed after write:', statErr);
+        }
       } catch (err) {
         lastError = err;
-        console.warn(`Failed writing image to directory ${loc.directory}:`, err);
+        console.warn(`Failed writing image to ${cand.directory} / ${cand.path}:`, err);
       }
     }
 
-    throw new Error(lastError?.message || 'تعذر حفظ الصورة في ذاكرة الهاتف');
+    if (!writtenUri && lastError) {
+      throw new Error(lastError?.message || 'تعذر حفظ الصورة في معرض الصور');
+    }
+
+    return {
+      success: true,
+      dataUrl,
+      fileUri: writtenUri || undefined,
+      filename: uniqueFilename,
+      isNative: true,
+    };
   }
 
   try {
